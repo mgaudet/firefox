@@ -27,22 +27,23 @@ UNIFIED_SOURCES += [
   'lib/decompress/zstd_decompress_block.c',
 ]
 
-# we aren't using these currently
-#COMPRESS_SOURCES = [
-#  'lib/compress/fse_compress.c',
-#  'lib/compress/hist.c',
-#  'lib/compress/huf_compress.c',
-#  'lib/compress/zstd_compress.c',
-#  'lib/compress/zstd_compress_literals.c',
-#  'lib/compress/zstd_compress_sequences.c',
-#  'lib/compress/zstd_compress_superblock.c',
-#  'lib/compress/zstd_double_fast.c',
-#  'lib/compress/zstd_fast.c',
-#  'lib/compress/zstd_lazy.c',
-#  'lib/compress/zstd_ldm.c',
-#  'lib/compress/zstd_opt.c',
-#  'lib/compress/zstdmt_compress.c',
-#]
+# Enable compression sources for SpiderMonkey source compression
+UNIFIED_SOURCES += [
+  'lib/compress/fse_compress.c',
+  'lib/compress/hist.c',
+  'lib/compress/huf_compress.c',
+  'lib/compress/zstd_compress.c',
+  'lib/compress/zstd_compress_literals.c',
+  'lib/compress/zstd_compress_sequences.c',
+  'lib/compress/zstd_compress_superblock.c',
+  'lib/compress/zstd_double_fast.c',
+  'lib/compress/zstd_fast.c',
+  'lib/compress/zstd_lazy.c',
+  'lib/compress/zstd_ldm.c',
+  'lib/compress/zstd_opt.c',
+  'lib/compress/zstd_preSplit.c',
+  'lib/compress/zstdmt_compress.c',
+]
 
 CFLAGS += [
      '-Wextra',
@@ -71,7 +72,7 @@ CXXFLAGS += [
   '-DZSTD_MULTITHREAD=1',
 ]
 
-LOCAL_INCLUDES += [ 'lib/decompress' ]
+LOCAL_INCLUDES += [ 'lib/compress', 'lib/decompress' ]
 
 # .S assembler format is incompatible with Microsoft MASM, disable for now
 if CONFIG["OS_ARCH"] == "WINNT":
@@ -103,5 +104,5 @@ AllowCompilerWarnings()
 
 Library('zstd')
 
-FINAL_LIBRARY = 'xul'
+FINAL_LIBRARY = 'js'
 

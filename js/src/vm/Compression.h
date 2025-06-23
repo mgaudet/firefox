@@ -8,6 +8,7 @@
 #define vm_Compression_h
 
 #include <zlib.h>
+#include <zstd/zstd.h>
 
 #include "jstypes.h"
 
@@ -16,8 +17,16 @@
 
 namespace js {
 
+enum class CompressionAlgorithm : uint8_t {
+  ZLIB = 0,
+  ZSTD = 1
+};
+
 struct CompressedDataHeader {
   uint32_t compressedBytes;
+  CompressionAlgorithm algorithm;
+  uint8_t level;
+  uint16_t reserved; // For future use, maintain alignment
 };
 
 class Compressor {
@@ -27,10 +36,22 @@ class Compressor {
   static constexpr size_t CHUNK_SIZE = 64 * 1024;
 
  private:
-  // Number of bytes we should hand to zlib each compressMore() call.
+  // Number of bytes we should hand to the compressor each compressMore() call.
   static constexpr size_t MAX_INPUT_SIZE = 2 * 1024;
 
-  z_stream zs;
+  // Compression algorithm to use
+  CompressionAlgorithm algorithm_;
+  uint8_t level_;
+
+  // Union for algorithm-specific compression contexts
+  union {
+    z_stream zs;
+    ZSTD_CStream* zstdCStream;
+  };
+  
+  // zstd output buffer (used when algorithm is ZSTD)
+  ZSTD_outBuffer zstdOutput;
+
   const unsigned char* inp;
   size_t inplen;
   size_t outbytes;
@@ -40,6 +61,9 @@ class Compressor {
   // The number of uncompressed bytes written for the current chunk. When this
   // reaches CHUNK_SIZE, we finish the current chunk and start a new chunk.
   uint32_t currentChunkSize;
+  
+  // Input position for zstd compression (zlib tracks this in z_stream)
+  size_t zstdInputPos;
 
   // At the end of each chunk (and the end of the uncompressed data if it's
   // not a chunk boundary), we record the offset in the compressed data.
@@ -48,12 +72,20 @@ class Compressor {
  public:
   enum Status { MOREOUTPUT, DONE, CONTINUE, OOM };
 
-  Compressor(const unsigned char* inp, size_t inplen);
+  Compressor(const unsigned char* inp, size_t inplen, 
+             CompressionAlgorithm algorithm = CompressionAlgorithm::ZLIB,
+             uint8_t level = 0);
   ~Compressor();
   bool init();
   void setOutput(unsigned char* out, size_t outlen);
   /* Compress some of the input. Return true if it should be called again. */
   Status compressMore();
+  
+private:
+  Status compressMoreZlib();
+  Status compressMoreZstd();
+  
+public:
   size_t sizeOfChunkOffsets() const {
     return chunkOffsets.length() * sizeof(chunkOffsets[0]);
   }
@@ -98,6 +130,7 @@ class Compressor {
 /*
  * Decompress a string. The caller must know the length of the output and
  * allocate |out| to a string of that length.
+ * Algorithm is auto-detected from the compressed data header.
  */
 bool DecompressString(const unsigned char* inp, size_t inplen,
                       unsigned char* out, size_t outlen);
@@ -106,6 +139,7 @@ bool DecompressString(const unsigned char* inp, size_t inplen,
  * Decompress a single chunk of at most Compressor::CHUNK_SIZE bytes.
  * |chunk| is the chunk index. The caller must know the length of the output
  * (the uncompressed chunk) and allocate |out| to a string of that length.
+ * Algorithm is auto-detected from the compressed data header.
  */
 bool DecompressStringChunk(const unsigned char* inp, size_t chunk,
                            unsigned char* out, size_t outlen);
