@@ -57,7 +57,7 @@
 #include "builtin/Promise.h"
 #include "builtin/TestingUtility.h"  // js::ParseCompileOptions, js::ParseDebugMetadata
 #include "builtin/WeakMapObject.h"
-#include "ds/IdValuePair.h"          // js::IdValuePair
+#include "ds/IdValuePair.h"               // js::IdValuePair
 #include "frontend/CompilationStencil.h"  // frontend::CompilationStencil
 #include "frontend/FrontendContext.h"     // AutoReportFrontendContext
 #include "gc/GC.h"
@@ -6764,183 +6764,209 @@ static bool DumpValueToString(JSContext* cx, unsigned argc, Value* vp) {
 }
 #endif
 
+// Helper for reallocating UniquePtr, similar to JSScript.cpp
+[[nodiscard]] static bool reallocUniquePtr(
+    UniquePtr<char[], JS::FreePolicy>& unique, size_t size) {
+  auto newPtr = static_cast<char*>(js_realloc(unique.get(), size));
+  if (!newPtr) {
+    return false;
+  }
+
+  // Since realloc succeeded, unique is now holding a freed pointer
+  (void)unique.release();
+  unique.reset(newPtr);
+  return true;
+}
+
 static bool CompressString(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  
+
   if (!args.requireAtLeast(cx, "compressString", 1)) {
     return false;
   }
-  
+
   // Convert input to string
   RootedString str(cx, ToString(cx, args[0]));
   if (!str) {
     return false;
   }
-  
+
   // Get string data
   AutoStableStringChars stableChars(cx);
   if (!stableChars.initTwoByte(cx, str)) {
     return false;
   }
-  
+
   mozilla::Range<const char16_t> chars = stableChars.twoByteRange();
   size_t inputBytes = chars.length() * sizeof(char16_t);
-  const unsigned char* inputPtr = reinterpret_cast<const unsigned char*>(chars.begin().get());
-  
-  // Create compressor
+  const unsigned char* inputPtr =
+      reinterpret_cast<const unsigned char*>(chars.begin().get());
+
+  // Create compressor exactly like SourceCompressionTask does
   Compressor comp(inputPtr, inputBytes);
   if (!comp.init()) {
     JS_ReportOutOfMemory(cx);
     return false;
   }
-  
-  // Allocate output buffer with space for uncompressed size at the beginning
-  size_t maxOutputSize = sizeof(uint32_t) + inputBytes + sizeof(CompressedDataHeader) + 
-                         (inputBytes / Compressor::CHUNK_SIZE + 1) * sizeof(uint32_t) + 1024;
-  UniquePtr<unsigned char[], JS::FreePolicy> output(js_pod_malloc<unsigned char>(maxOutputSize));
-  if (!output) {
+
+  // Start with half the input size, like the real implementation
+  size_t firstSize = inputBytes / 2;
+  UniquePtr<char[], JS::FreePolicy> compressed(js_pod_malloc<char>(firstSize));
+  if (!compressed) {
     JS_ReportOutOfMemory(cx);
     return false;
   }
-  
-  // Store uncompressed size at the beginning
-  *reinterpret_cast<uint32_t*>(output.get()) = inputBytes;
-  
-  // Compress starting after the size field
-  comp.setOutput(output.get() + sizeof(uint32_t), maxOutputSize - sizeof(uint32_t));
-  
-  Compressor::Status status;
-  do {
-    status = comp.compressMore();
-    if (status == Compressor::OOM) {
-      return false;
+
+  comp.setOutput(reinterpret_cast<unsigned char*>(compressed.get()), firstSize);
+  bool cont = true;
+  bool reallocated = false;
+
+  while (cont) {
+    switch (comp.compressMore()) {
+      case Compressor::CONTINUE:
+        break;
+      case Compressor::MOREOUTPUT: {
+        if (reallocated) {
+          // Compressed string is longer than original
+          JS_ReportErrorASCII(cx, "String does not compress well");
+          return false;
+        }
+
+        // Reallocate to full input size
+        if (!reallocUniquePtr(compressed, inputBytes)) {
+          JS_ReportOutOfMemory(cx);
+          return false;
+        }
+
+        comp.setOutput(reinterpret_cast<unsigned char*>(compressed.get()),
+                       inputBytes);
+        reallocated = true;
+        break;
+      }
+      case Compressor::DONE:
+        cont = false;
+        break;
+      case Compressor::OOM:
+        JS_ReportOutOfMemory(cx);
+        return false;
     }
-  } while (status == Compressor::CONTINUE);
-  
-  // Get final size and finish
+  }
+
   size_t compressedSize = comp.totalBytesNeeded();
-  if (compressedSize > maxOutputSize - sizeof(uint32_t)) {
-    JS_ReportErrorASCII(cx, "Compressed size exceeds buffer");
+
+  // Shrink buffer to actual compressed size
+  if (!reallocUniquePtr(compressed, compressedSize)) {
+    JS_ReportOutOfMemory(cx);
     return false;
   }
-  
-  comp.finish(reinterpret_cast<char*>(output.get() + sizeof(uint32_t)), compressedSize);
-  
-  // Total size includes the uncompressed size field
+
+  // Finish compression - this creates the complete SpiderMonkey format
+  comp.finish(compressed.get(), compressedSize);
+
+  // Create final buffer with uncompressed size prepended
   size_t totalSize = sizeof(uint32_t) + compressedSize;
-  
-  // Create ArrayBuffer with compressed data
-  RootedObject buffer(cx, JS::NewArrayBufferWithContents(cx, totalSize, output.get(),
-                                                         JS::NewArrayBufferOutOfMemory::CallerMustFreeMemory));
+  UniquePtr<char[], JS::FreePolicy> finalBuffer(js_pod_malloc<char>(totalSize));
+  if (!finalBuffer) {
+    JS_ReportOutOfMemory(cx);
+    return false;
+  }
+
+  // Store uncompressed size at the beginning for decompression
+  *reinterpret_cast<uint32_t*>(finalBuffer.get()) = inputBytes;
+
+  // Copy compressed data after the size
+  memcpy(finalBuffer.get() + sizeof(uint32_t), compressed.get(),
+         compressedSize);
+
+  // Create ArrayBuffer with the final data
+  RootedObject buffer(cx,
+                      JS::NewArrayBufferWithContents(
+                          cx, totalSize, finalBuffer.get(),
+                          JS::NewArrayBufferOutOfMemory::CallerMustFreeMemory));
   if (!buffer) {
     return false;
   }
-  
+
   // Release ownership since ArrayBuffer now owns it
-  mozilla::Unused << output.release();
-  
+  mozilla::Unused << finalBuffer.release();
+
   args.rval().setObject(*buffer);
   return true;
 }
 
 static bool DecompressString(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  
+
   if (!args.requireAtLeast(cx, "decompressString", 1)) {
     return false;
   }
-  
+
   // Get compressed data from ArrayBuffer
   if (!args[0].isObject()) {
     JS_ReportErrorASCII(cx, "Argument must be an ArrayBuffer");
     return false;
   }
-  
+
   RootedObject obj(cx, &args[0].toObject());
-  
-  // We need to handle ArrayBuffer specifically
+
   if (!obj->is<ArrayBufferObject>()) {
     JS_ReportErrorASCII(cx, "Argument must be an ArrayBuffer");
     return false;
   }
-  
+
   ArrayBufferObject* buffer = &obj->as<ArrayBufferObject>();
-  size_t length;
+  size_t totalLength;
   bool isSharedMemory;
   uint8_t* data = nullptr;
-  
-  JS::GetArrayBufferLengthAndData(buffer, &length, &isSharedMemory, &data);
-  
-  if (!data || length < sizeof(uint32_t)) {
-    JS_ReportErrorASCII(cx, "Compressed data too small");
+
+  JS::GetArrayBufferLengthAndData(buffer, &totalLength, &isSharedMemory, &data);
+
+  if (!data || totalLength < sizeof(uint32_t)) {
+    JS_ReportErrorASCII(cx, "Data too small");
     return false;
   }
-  
-  // Read the uncompressed size from the beginning of the data
-  uint32_t uncompressedSize = *reinterpret_cast<const uint32_t*>(data);
-  
-  // Skip our custom size header and get to the SpiderMonkey compressed format
+
+  // Read the uncompressed size from the beginning
+  uint32_t uncompressedBytes = *reinterpret_cast<const uint32_t*>(data);
+
+  // The compressed data starts after the size field
   const unsigned char* compressedData = data + sizeof(uint32_t);
-  size_t compressedLength = length - sizeof(uint32_t);
-  
-  // The SpiderMonkey format starts with a CompressedDataHeader
-  if (compressedLength < sizeof(CompressedDataHeader)) {
-    JS_ReportErrorASCII(cx, "Invalid compressed data format");
-    return false;
-  }
-  
-  const CompressedDataHeader* header = reinterpret_cast<const CompressedDataHeader*>(compressedData);
-  
-  // The actual deflate data starts after the header
-  const unsigned char* deflateData = compressedData + sizeof(CompressedDataHeader);
-  size_t deflateLength = header->compressedBytes;
-  
+
+  // For chunked decompression, we need to calculate number of chunks
+  size_t chunkCount =
+      (uncompressedBytes + Compressor::CHUNK_SIZE - 1) / Compressor::CHUNK_SIZE;
+
   // Allocate buffer for decompressed data
-  UniquePtr<unsigned char[], JS::FreePolicy> decompressed(js_pod_malloc<unsigned char>(uncompressedSize));
+  UniquePtr<char16_t[], JS::FreePolicy> decompressed(
+      js_pod_malloc<char16_t>(uncompressedBytes / sizeof(char16_t)));
   if (!decompressed) {
     JS_ReportOutOfMemory(cx);
     return false;
   }
-  
-  // Decompress using raw deflate format (WindowBits = -15)
-  z_stream zs;
-  zs.zalloc = nullptr;
-  zs.zfree = nullptr;
-  zs.opaque = nullptr;
-  zs.next_in = const_cast<unsigned char*>(deflateData);
-  zs.avail_in = deflateLength;
-  zs.next_out = decompressed.get();
-  zs.avail_out = uncompressedSize;
-  
-  // Use raw deflate format (WindowBits = -15) to match compression
-  int ret = inflateInit2(&zs, -15);
-  if (ret != Z_OK) {
-    JS_ReportErrorASCII(cx, "Failed to initialize decompression");
-    return false;
+
+  // Decompress each chunk using DecompressStringChunk
+  size_t outputOffset = 0;
+  for (size_t chunk = 0; chunk < chunkCount; chunk++) {
+    size_t chunkBytes = Compressor::chunkSize(uncompressedBytes, chunk);
+
+    if (!DecompressStringChunk(
+            compressedData, chunk,
+            reinterpret_cast<unsigned char*>(decompressed.get()) + outputOffset,
+            chunkBytes)) {
+      JS_ReportErrorASCII(cx, "Failed to decompress chunk");
+      return false;
+    }
+
+    outputOffset += chunkBytes;
   }
-  
-  ret = inflate(&zs, Z_FINISH);
-  bool success = (ret == Z_STREAM_END);
-  
-  int endRet = inflateEnd(&zs);
-  if (endRet != Z_OK) {
-    success = false;
-  }
-  
-  if (!success) {
-    JS_ReportErrorASCII(cx, "Failed to decompress string");
-    return false;
-  }
-  
+
   // Create a string from the decompressed data
-  size_t charLength = uncompressedSize / sizeof(char16_t);
-  const char16_t* chars = reinterpret_cast<const char16_t*>(decompressed.get());
-  
-  JSString* result = NewStringCopyN<CanGC>(cx, chars, charLength);
+  size_t charLength = uncompressedBytes / sizeof(char16_t);
+  JSString* result = NewString<CanGC>(cx, std::move(decompressed), charLength);
   if (!result) {
     return false;
   }
-  
+
   args.rval().setString(result);
   return true;
 }
