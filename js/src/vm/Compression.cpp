@@ -35,6 +35,9 @@ Compressor::Compressor(const unsigned char* inp, size_t inplen,
       zstdInputPos(0) {
   MOZ_ASSERT(inplen > 0, "data to compress can't be empty");
 
+  // Use default algorithm and level if not specified
+  // Note: Preference integration pending build system support
+
   if (algorithm_ == CompressionAlgorithm::ZLIB) {
     zs.opaque = nullptr;
     zs.next_in = (Bytef*)inp;

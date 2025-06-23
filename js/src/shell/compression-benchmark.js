@@ -42,23 +42,20 @@ function formatTime(ms) {
     return (ms / 1000).toFixed(2) + " s";
 }
 
-function benchmark(name, source) {
-    print(`\n=== ${name} ===`);
-    print(`Source size: ${formatBytes(source.length * 2)} (${source.length} characters)`);
-    
+function benchmarkAlgorithm(algorithmName, algorithm, level, source) {
     const iterations = 10;
     let compressTimes = [];
     let decompressTimes = [];
     let compressedSizes = [];
     
     // Warm up
-    let compressed = compressString(source);
+    let compressed = compressString(source, algorithm, level);
     decompressString(compressed);
     
     // Benchmark compression
     for (let i = 0; i < iterations; i++) {
         const start = dateNow();
-        compressed = compressString(source);
+        compressed = compressString(source, algorithm, level);
         const end = dateNow();
         compressTimes.push(end - start);
         compressedSizes.push(compressed.byteLength);
@@ -73,25 +70,61 @@ function benchmark(name, source) {
         
         // Verify correctness
         if (decompressed !== source) {
-            throw new Error("Decompressed string doesn't match original!");
+            throw new Error(`Decompressed string doesn't match original (${algorithmName})!`);
         }
     }
     
-    // Calculate statistics
     const avgCompressTime = compressTimes.reduce((a, b) => a + b) / iterations;
     const avgDecompressTime = decompressTimes.reduce((a, b) => a + b) / iterations;
-    const compressedSize = compressedSizes[0];
-    const compressionRatio = ((1 - compressedSize / (source.length * 2)) * 100).toFixed(1);
+    const avgCompressedSize = compressedSizes.reduce((a, b) => a + b) / iterations;
+    const compressionRatio = ((source.length * 2 - avgCompressedSize) / (source.length * 2)) * 100;
+    const compressSpeed = (source.length * 2) / (avgCompressTime / 1000) / (1024 * 1024); // MB/s
+    const decompressSpeed = (source.length * 2) / (avgDecompressTime / 1000) / (1024 * 1024); // MB/s
     
-    // Calculate throughput
-    const compressThroughput = (source.length * 2) / (avgCompressTime / 1000) / (1024 * 1024);
-    const decompressThroughput = (source.length * 2) / (avgDecompressTime / 1000) / (1024 * 1024);
+    return {
+        algorithm: algorithmName,
+        avgCompressTime,
+        avgDecompressTime,
+        avgCompressedSize,
+        compressionRatio,
+        compressSpeed,
+        decompressSpeed
+    };
+}
+
+function benchmark(name, source) {
+    print(`\n=== ${name} ===`);
+    print(`Source size: ${formatBytes(source.length * 2)} (${source.length} characters)`);
     
-    print(`Compressed size: ${formatBytes(compressedSize)} (${compressionRatio}% reduction)`);
-    print(`Compression time: ${formatTime(avgCompressTime)} (${compressThroughput.toFixed(2)} MB/s)`);
-    print(`Decompression time: ${formatTime(avgDecompressTime)} (${decompressThroughput.toFixed(2)} MB/s)`);
+    // Test zlib (algorithm 0) with default level
+    const zlibResults = benchmarkAlgorithm("zlib", 0, 0, source);
     
-    // Check if we're using chunking
+    // Test zstd (algorithm 1) with default level  
+    const zstdResults = benchmarkAlgorithm("zstd", 1, 0, source);
+    
+    // Test zstd with higher compression level
+    const zstdHighResults = benchmarkAlgorithm("zstd-high", 1, 6, source);
+    
+    // Print results
+    print(`\nResults:`);
+    print(`Algorithm     | Compress Time | Decompress Time | Compressed Size | Ratio | Comp Speed | Decomp Speed`);
+    print(`------------- | ------------- | --------------- | --------------- | ----- | ---------- | ------------`);
+    
+    [zlibResults, zstdResults, zstdHighResults].forEach(r => {
+        print(`${r.algorithm.padEnd(13)} | ${formatTime(r.avgCompressTime).padEnd(13)} | ${formatTime(r.avgDecompressTime).padEnd(15)} | ${formatBytes(r.avgCompressedSize).padEnd(15)} | ${r.compressionRatio.toFixed(1).padEnd(5)}% | ${r.compressSpeed.toFixed(1).padEnd(10)} MB/s | ${r.decompressSpeed.toFixed(1).padEnd(12)} MB/s`);
+    });
+    
+    // Print comparison
+    const zlibTime = zlibResults.avgCompressTime;
+    const zstdTime = zstdResults.avgCompressTime;
+    const zstdSpeedup = zlibTime / zstdTime;
+    const sizeImprovement = ((zlibResults.avgCompressedSize - zstdResults.avgCompressedSize) / zlibResults.avgCompressedSize) * 100;
+    
+    print(`\nComparison:`);
+    print(`- zstd is ${zstdSpeedup.toFixed(2)}x ${zstdSpeedup > 1 ? 'faster' : 'slower'} than zlib for compression`);
+    print(`- zstd achieves ${sizeImprovement.toFixed(1)}% ${sizeImprovement > 0 ? 'better' : 'worse'} compression ratio than zlib`);
+    
+    // Check if we're using chunking  
     const numChunks = Math.ceil((source.length * 2) / (64 * 1024));
     if (numChunks > 1) {
         print(`Number of chunks: ${numChunks}`);

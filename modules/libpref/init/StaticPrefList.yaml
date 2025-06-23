@@ -8513,6 +8513,20 @@
   mirror: always  # LoadStartupJSPrefs
   do_not_use_directly: true
 
+# Source compression algorithm: 0=zlib (default), 1=zstd
+- name: javascript.options.compression.algorithm
+  type: uint32_t
+  value: 0
+  mirror: always
+  set_spidermonkey_pref: startup
+
+# Source compression level: 0=default, 1-22 for zstd, 1-9 for zlib
+- name: javascript.options.compression.level
+  type: uint32_t
+  value: 0
+  mirror: always
+  set_spidermonkey_pref: startup
+
 - name: javascript.options.ion
   type: bool
   value: true

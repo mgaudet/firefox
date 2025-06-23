@@ -6791,6 +6791,34 @@ static bool CompressString(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
+  // Parse optional algorithm parameter (default: use preferences)
+  CompressionAlgorithm algorithm = CompressionAlgorithm::ZLIB; // Will be overridden by preferences
+  if (argc >= 2 && !args[1].isNullOrUndefined()) {
+    int32_t alg;
+    if (!ToInt32(cx, args[1], &alg)) {
+      return false;
+    }
+    if (alg < 0 || alg > 1) {
+      JS_ReportErrorASCII(cx, "Algorithm must be 0 (zlib) or 1 (zstd)");
+      return false;
+    }
+    algorithm = static_cast<CompressionAlgorithm>(alg);
+  }
+
+  // Parse optional level parameter (default: use preferences)
+  uint8_t level = 0; // Will be overridden by preferences if not specified
+  if (argc >= 3 && !args[2].isNullOrUndefined()) {
+    int32_t lvl;
+    if (!ToInt32(cx, args[2], &lvl)) {
+      return false;
+    }
+    if (lvl < 0 || lvl > 22) {
+      JS_ReportErrorASCII(cx, "Level must be 0-22 (0=default, 1-9 for zlib, 1-22 for zstd)");
+      return false;
+    }
+    level = static_cast<uint8_t>(lvl);
+  }
+
   // Get string data
   AutoStableStringChars stableChars(cx);
   if (!stableChars.initTwoByte(cx, str)) {
@@ -6802,8 +6830,8 @@ static bool CompressString(JSContext* cx, unsigned argc, Value* vp) {
   const unsigned char* inputPtr =
       reinterpret_cast<const unsigned char*>(chars.begin().get());
 
-  // Create compressor exactly like SourceCompressionTask does
-  Compressor comp(inputPtr, inputBytes);
+  // Create compressor with specified algorithm and level
+  Compressor comp(inputPtr, inputBytes, algorithm, level);
   if (!comp.init()) {
     JS_ReportOutOfMemory(cx);
     return false;
