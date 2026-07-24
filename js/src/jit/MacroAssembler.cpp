@@ -5356,6 +5356,47 @@ void MacroAssembler::powPtr(Register base, Register power, Register dest,
   bind(&done);
 }
 
+void MacroAssembler::modDoubleIntegerFastPath(
+    FloatRegister lhs, FloatRegister rhs, FloatRegister output, Register temp1,
+    Register temp2, const LiveRegisterSet& volatileLiveRegs, Label* fail) {
+  MOZ_ASSERT(temp1 != temp2);
+
+  // Bail out unless both operands are integer-valued and in range.
+  //
+  // convertDoubleToPtr does a convert-and-round-trip check, and will fail
+  // for any double that isn't exactly representable in a signed intptr_t:
+  //
+  // On 32-bit platforms that means anything outside the Int32 range falls through
+  // to the generic path.
+  convertDoubleToPtr(rhs, temp2, fail, /* negativeZeroCheck = */ true);
+
+  // Reject a zero divisor (gives NaN) and a -1 divisor.
+  branchTestPtr(Assembler::Zero, temp2, temp2, fail);
+  branchPtr(Assembler::Equal, temp2, Imm32(-1), fail);
+
+  convertDoubleToPtr(lhs, temp1, fail, /* negativeZeroCheck = */ true);
+
+  // Reject INT64_MAX
+  if constexpr (sizeof(intptr_t) == sizeof(int64_t)) {
+    branchPtr(Assembler::Equal, temp2, ImmWord(uintptr_t(INTPTR_MAX)), fail);
+    branchPtr(Assembler::Equal, temp1, ImmWord(uintptr_t(INTPTR_MAX)), fail);
+  }
+
+  flexibleRemainderPtr(temp1, temp2, temp2, /* isUnsigned = */ false,
+                       volatileLiveRegs);
+
+  // The exact remainder of two integer-valued doubles is itself always
+  // representable as a double, so this conversion never rounds.
+  convertIntPtrToDouble(temp2, output);
+
+  // A zero remainder takes the sign of the dividend.
+  Label done;
+  branchTestPtr(Assembler::NonZero, temp2, temp2, &done);
+  branchTestPtr(Assembler::NotSigned, temp1, temp1, &done);
+  loadConstantDouble(-0.0, output);
+  bind(&done);
+}
+
 void MacroAssembler::signInt32(Register input, Register output) {
   MOZ_ASSERT(input != output);
 

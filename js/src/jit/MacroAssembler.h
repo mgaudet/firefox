@@ -1267,6 +1267,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
       Register lhs, Register rhs, Register divOutput, Register remOutput,
       bool isUnsigned, const LiveRegisterSet& volatileLiveRegs) PER_SHARED_ARCH;
 
+  // Inline fast path for the JS remainder operator on doubles. If both
+  // operands are integer-valued and fit in a signed intptr_t, the remainder is
+  // computed with an integer division and stored in |output|. Otherwise this
+  // jumps to |fail| without touching |lhs|, |rhs| or |output|, and the caller
+  // is expected to fall back to js::NumberMod.
+  //
+  // |temp1| and |temp2| must be different registers and are both clobbered.
+  void modDoubleIntegerFastPath(FloatRegister lhs, FloatRegister rhs,
+                                FloatRegister output, Register temp1,
+                                Register temp2,
+                                const LiveRegisterSet& volatileLiveRegs,
+                                Label* fail);
+
   inline void divFloat32(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
   inline void divDouble(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
 
