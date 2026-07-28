@@ -36,6 +36,27 @@ void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   MacroAssemblerSpecific::loadPtr(Address(dest, slotOff), dest);
 }
 
+// The rip relative encoders return the offset just past the instruction, so
+// its displacement occupies the four bytes before that.
+static uint32_t DisplacementOffset(CodeOffset afterInstruction) {
+  MOZ_ASSERT(afterInstruction.offset() >= sizeof(int32_t));
+  return uint32_t(afterInstruction.offset()) - sizeof(int32_t);
+}
+
+void MacroAssembler::emitAOTLinkAddress(AOTSlot slot, Register dest) {
+  MOZ_ASSERT(IsAOTLinkSlot(slot));
+  CodeOffset off = Assembler::leaRipRelative(dest);
+  propagateOOM(aotLinkSites_.append(
+      AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
+}
+
+void MacroAssembler::emitAOTLinkLoad(AOTSlot slot, Register dest) {
+  MOZ_ASSERT(IsAOTLinkSlot(slot));
+  CodeOffset off = Assembler::loadRipRelativeInt64(dest);
+  propagateOOM(aotLinkSites_.append(
+      AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
+}
+
 static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
   switch (type) {
     case MIRType::Value:

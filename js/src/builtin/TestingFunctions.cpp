@@ -2044,8 +2044,8 @@ static bool DisassembleBaselineICs(JSContext* cx, unsigned argc, Value* vp) {
       sprinter.printf(";   Stub #%d (entry count: %d)\n", stubNum,
                       stub->enteredCount());
       jit::ICCacheIRStub* cacheIRStub = stub->toCacheIRStub();
-      uint8_t* jit_begin = stub->jitCode()->raw();
-      uint8_t* jit_end = stub->jitCode()->rawEnd();
+      uint8_t* jit_begin = cacheIRStub->jitCode()->raw();
+      uint8_t* jit_end = cacheIRStub->jitCode()->rawEnd();
 #ifdef JS_CACHEIR_SPEW
       sprinter.printf(";   IR:\n");
       SpewCacheIROps(sprinter, ";        ", cacheIRStub->stubInfo());

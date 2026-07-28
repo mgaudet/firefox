@@ -27,7 +27,9 @@ const char* AOTSlotName(AOTSlot slot) {
   case AOTSlot::name:       \
     return #name;
 #define AOT_ATOM_SLOT AOT_SLOT
+#define AOT_LINK_SLOT AOT_SLOT
 #include "jit/AOTSlots.tbl"
+#undef AOT_LINK_SLOT
 #undef AOT_ATOM_SLOT
 #undef AOT_SLOT
     case AOTSlot::InterruptBitsValue:
@@ -70,12 +72,14 @@ mozilla::Maybe<AOTSlot> AOTIndirectionTable::findAtomSlot(
     return mozilla::Nothing();
   }
 #define AOT_SLOT(name, ...)
+#define AOT_LINK_SLOT(name, ...)
 #define AOT_ATOM_SLOT(name, ...)                  \
   if (slots_[uint32_t(AOTSlot::name)] == value) { \
     return mozilla::Some(AOTSlot::name);          \
   }
 #include "jit/AOTSlots.tbl"
 #undef AOT_ATOM_SLOT
+#undef AOT_LINK_SLOT
 #undef AOT_SLOT
   return mozilla::Nothing();
 }

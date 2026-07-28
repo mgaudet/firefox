@@ -497,8 +497,8 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       mozilla::SHA1Sum::Hash identity;
       ComputeBaselineIdentityHash(script, identity);
       if (!rec->recordBaselineFunction(cx, dumpCode, identity,
-                                       ComputeBaselineProbeHash(script),
-                                       dumpMd)) {
+                                       ComputeBaselineProbeHash(script), dumpMd,
+                                       dumpMasm.aotLinkSites())) {
         return Method_Error;
       }
     }
@@ -1475,7 +1475,8 @@ bool jit::CaptureAOTBaselineInterpreter(
   if (AOTArtifactRecorder* recorder =
           cx->runtime()->jitRuntime()->aotRecorder()) {
     if (!recorder->recordInterpreter(cx, capturedInterpreter.code(),
-                                     capturedInterpreter.metadata())) {
+                                     capturedInterpreter.metadata(),
+                                     masm.aotLinkSites())) {
       return false;
     }
   }

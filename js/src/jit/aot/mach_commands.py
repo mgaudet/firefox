@@ -135,9 +135,9 @@ def jit_aot_build(command_context, workload=None):
     if rc != 0:
         return rc
 
-    # Touch the assembly source so the next build reassembles and relinks the
+    # Touch the shim source so the next build recompiles and relinks the
     # embedded image.
-    (aot_dir / "AOTImageIncbin.S").touch()
+    (aot_dir / "AOTImageIncbin.cpp").touch()
     command_context.log(
         logging.INFO,
         "jit-aot",

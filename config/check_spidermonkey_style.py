@@ -71,6 +71,7 @@ included_inclnames_to_ignore = set([
     "icu4x/WordSegmenter.hpp",  # ICU4X
     "jit/ABIFunctionTypeGenerated.h",  # generated in $OBJDIR"
     "jit/AOTImageGenerated.h",  # generated in $OBJDIR
+    "jit/aot/AOTImageRelocs.inc",  # generated in $OBJDIR
     "jit/AtomicOperationsGenerated.h",  # generated in $OBJDIR
     "jit/CacheIROpsGenerated.h",  # generated in $OBJDIR
     "jit/CacheIRAOTGenerated.h",  # generated in $OBJDIR
@@ -134,6 +135,8 @@ oddly_ordered_inclnames = set([
     "frontend/ReservedWordsGenerated.h",
     "gc/StatsPhasesGenerated.h",  # Included in the body of gc/Statistics.h
     "gc/StatsPhasesGenerated.inc",  # Included in the body of gc/Statistics.cpp
+    # Included in the body of jit/aot/AOTImageIncbin.cpp
+    "jit/aot/AOTImageRelocs.inc",
     "psapi.h",  # Must be included after "util/WindowsWrapper.h" on Windows
     "machine/endian.h",  # Must be included after <sys/types.h> on BSD
     "process.h",  # Windows-specific

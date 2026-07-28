@@ -157,7 +157,9 @@ bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
 #  define AOT_SLOT(name, expr) \
     aotIndirectionTable_.set(AOTSlot::name, uintptr_t(expr));
 #  define AOT_ATOM_SLOT AOT_SLOT
+#  define AOT_LINK_SLOT AOT_SLOT
 #  include "jit/AOTSlots.tbl"
+#  undef AOT_LINK_SLOT
 #  undef AOT_ATOM_SLOT
 #  undef AOT_SLOT
 

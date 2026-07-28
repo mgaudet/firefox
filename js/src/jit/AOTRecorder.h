@@ -10,12 +10,14 @@
 #ifdef ENABLE_JS_AOT
 
 #  include "mozilla/HashTable.h"
+#  include "mozilla/Span.h"
 
 #  include <cstdint>
 #  include <string>
 
 #  include "jstypes.h"
 
+#  include "jit/AOT.h"
 #  include "jit/AOTImage.h"
 #  include "js/AllocPolicy.h"
 
@@ -47,22 +49,27 @@ class AOTArtifactRecorder {
 
   const std::string& directory() const { return directory_; }
 
+  // Each record entry point takes the link sites the capturing assembler
+  // collected. Their offsets are relative to the artifact's own code.
+
   // The baseline interpreter has a fixed artifact name because only one is
   // recorded.
   [[nodiscard]] bool recordInterpreter(JSContext* cx, JitCode* code,
-                                       const BaselineInterpreterMetadata& md);
+                                       const BaselineInterpreterMetadata& md,
+                                       mozilla::Span<const AOTLinkSite> sites);
 
   // Baseline function artifacts are named from a hash of the script state that
   // affects compilation.
-  [[nodiscard]] bool recordBaselineFunction(JSContext* cx, JitCode* code,
-                                            const uint8_t identityHash[20],
-                                            uint32_t probeHash,
-                                            const BaselineScriptMetadata& md);
+  [[nodiscard]] bool recordBaselineFunction(
+      JSContext* cx, JitCode* code, const uint8_t identityHash[20],
+      uint32_t probeHash, const BaselineScriptMetadata& md,
+      mozilla::Span<const AOTLinkSite> sites);
 
   // Inline cache identities cover the cache kind, encoded operations, and field
   // types. Artifact file names include a prefix of that hash.
   [[nodiscard]] bool recordICStub(JSContext* cx, JitCode* code,
-                                  const AOTICStubMetadata& md);
+                                  const AOTICStubMetadata& md,
+                                  mozilla::Span<const AOTLinkSite> sites);
 
   // Records each self hosted function by delazifying it and triggering baseline
   // compilation. Returns the number of artifacts recorded. An empty result is
@@ -76,7 +83,8 @@ class AOTArtifactRecorder {
                                    SystemAllocPolicy>;
 
   [[nodiscard]] bool writeBlobFile(JSContext* cx, const std::string& path,
-                                   const AOTBlobWriter& blob);
+                                   const AOTBlobWriter& blob,
+                                   mozilla::Span<const AOTLinkSite> sites);
 
   // Duplicate artifacts within a process are filtered in memory. Exclusive file
   // creation handles duplicates from other processes.

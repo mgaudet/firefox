@@ -278,8 +278,10 @@ class AOTImage {
 };
 
 // Defines the intermediate format for one recorded artifact. Each file contains
-// a fixed header followed by fields, arrays, and code in image directory order.
-// Both the recorder and packer use this format.
+// a fixed header followed by fields, arrays, code, and link sites in image
+// directory order. Both the recorder and packer use this format. Link sites
+// stop at the packer, which turns them into relocations the static linker has
+// already applied by the time the runtime sees the image bytes.
 struct AOTBlobFileHeader {
   uint32_t magic;
   uint16_t version;
@@ -290,14 +292,17 @@ struct AOTBlobFileHeader {
   uint32_t fieldsSize;
   uint32_t arraysSize;
   uint32_t codeSize;
+  uint32_t linkSitesSize;
+  // Identifies the slot numbering the link sites were recorded against.
+  uint32_t slotTableHash;
 };
 
-static_assert(sizeof(AOTBlobFileHeader) == 48,
+static_assert(sizeof(AOTBlobFileHeader) == 56,
               "AOTBlobFileHeader wire size; edit BlobFileVersion on change");
 
 // "AOTB" in little-endian.
 inline constexpr uint32_t BlobFileMagic = 0x42544F41;
-inline constexpr uint16_t BlobFileVersion = 1;
+inline constexpr uint16_t BlobFileVersion = 2;
 
 // Builds an image in memory from recorded artifacts using a supplied
 // fingerprint.

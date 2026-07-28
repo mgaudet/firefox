@@ -70,7 +70,7 @@ bool AOTArtifactRecorder::init(JSContext* cx, const char* dir) {
   if (!EncodeBlob_Configuration(blob, CurrentAOTConfiguration())) {
     return false;
   }
-  return writeBlobFile(cx, directory_ + "/configuration.aotb", blob);
+  return writeBlobFile(cx, directory_ + "/configuration.aotb", blob, {});
 }
 
 bool AOTArtifactRecorder::wasSeen(const uint8_t identityHash[20]) {
@@ -83,8 +83,9 @@ bool AOTArtifactRecorder::wasSeen(const uint8_t identityHash[20]) {
   return false;
 }
 
-bool AOTArtifactRecorder::writeBlobFile(JSContext* cx, const std::string& path,
-                                        const AOTBlobWriter& blob) {
+bool AOTArtifactRecorder::writeBlobFile(
+    JSContext* cx, const std::string& path, const AOTBlobWriter& blob,
+    mozilla::Span<const AOTLinkSite> sites) {
   // Artifact names encode identity, so the first successful writer owns the
   // file and concurrent recorders can safely ignore duplicates.
   int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
@@ -107,6 +108,8 @@ bool AOTArtifactRecorder::writeBlobFile(JSContext* cx, const std::string& path,
   hdr.fieldsSize = uint32_t(blob.fields().size());
   hdr.arraysSize = uint32_t(blob.arrays().size());
   hdr.codeSize = uint32_t(blob.code().size());
+  hdr.linkSitesSize = uint32_t(sites.size() * sizeof(AOTLinkSite));
+  hdr.slotTableHash = AOTSlotTableHash();
 
   auto writeBytes = [&](const void* p, size_t n) -> bool {
     const uint8_t* cur = static_cast<const uint8_t*>(p);
@@ -127,23 +130,26 @@ bool AOTArtifactRecorder::writeBlobFile(JSContext* cx, const std::string& path,
   return writeBytes(&hdr, sizeof(hdr)) &&
          writeBytes(blob.fields().data(), blob.fields().size()) &&
          writeBytes(blob.arrays().data(), blob.arrays().size()) &&
-         writeBytes(blob.code().data(), blob.code().size());
+         writeBytes(blob.code().data(), blob.code().size()) &&
+         writeBytes(sites.data(), hdr.linkSitesSize);
 }
 
 bool AOTArtifactRecorder::recordInterpreter(
-    JSContext* cx, JitCode* code, const BaselineInterpreterMetadata& md) {
+    JSContext* cx, JitCode* code, const BaselineInterpreterMetadata& md,
+    mozilla::Span<const AOTLinkSite> sites) {
   AOTBlobWriter blob(AOTBlobKind::BaselineInterpreter, /* probeHash = */ 0,
                      /* identityHash = */ nullptr);
   if (!EncodeBlob_BaselineInterpreter(blob, md)) return false;
   if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
 
   std::string path = directory_ + "/interp.aotb";
-  return writeBlobFile(cx, path, blob);
+  return writeBlobFile(cx, path, blob, sites);
 }
 
 bool AOTArtifactRecorder::recordBaselineFunction(
     JSContext* cx, JitCode* code, const uint8_t identityHash[20],
-    uint32_t probeHash, const BaselineScriptMetadata& md) {
+    uint32_t probeHash, const BaselineScriptMetadata& md,
+    mozilla::Span<const AOTLinkSite> sites) {
   if (wasSeen(identityHash)) return true;
 
   AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash, identityHash);
@@ -153,7 +159,7 @@ bool AOTArtifactRecorder::recordBaselineFunction(
   char idHex[41];
   HexEncode(identityHash, 8, idHex);
   std::string path = directory_ + "/blfun-" + idHex + ".aotb";
-  return writeBlobFile(cx, path, blob);
+  return writeBlobFile(cx, path, blob, sites);
 }
 
 bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
@@ -240,7 +246,8 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
 }
 
 bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
-                                       const AOTICStubMetadata& md) {
+                                       const AOTICStubMetadata& md,
+                                       mozilla::Span<const AOTLinkSite> sites) {
   // Hash the inputs that determine generated stub code. Equal identities are
   // safe to deduplicate by file name.
   mozilla::SHA1Sum sha;
@@ -266,7 +273,7 @@ bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
   char idHex[41];
   HexEncode(hash, 8, idHex);
   std::string path = directory_ + "/ic-" + idHex + ".aotb";
-  return writeBlobFile(cx, path, blob);
+  return writeBlobFile(cx, path, blob, sites);
 }
 
 }  // namespace js::jit

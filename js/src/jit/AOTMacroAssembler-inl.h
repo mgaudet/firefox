@@ -47,7 +47,11 @@ inline void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
   if (MOZ_UNLIKELY(isAOT())) {
     uintptr_t val = uintptr_t(imm.value);
     if (auto slot = aotTable().findSlot(val)) {
-      emitAOTSlotLoad(*slot, dest);
+      if (IsAOTLinkSlot(*slot)) {
+        emitAOTLinkAddress(*slot, dest);
+      } else {
+        emitAOTSlotLoad(*slot, dest);
+      }
       return;
     }
     AOT_CRASH_ON_UNKNOWN_PTR("movePtr(ImmPtr)", val);
@@ -75,8 +79,12 @@ inline void MacroAssembler::loadPtr(AbsoluteAddress addr, Register dest) {
   if (MOZ_UNLIKELY(isAOT())) {
     uintptr_t val = uintptr_t(addr.addr);
     if (auto slot = aotTable().findSlot(val)) {
-      emitAOTSlotLoad(*slot, dest);
-      MacroAssemblerSpecific::loadPtr(Address(dest, 0), dest);
+      if (IsAOTLinkSlot(*slot)) {
+        emitAOTLinkLoad(*slot, dest);
+      } else {
+        emitAOTSlotLoad(*slot, dest);
+        MacroAssemblerSpecific::loadPtr(Address(dest, 0), dest);
+      }
       return;
     }
     AOT_CRASH_ON_UNKNOWN_PTR("loadPtr(AbsoluteAddress)", val);
@@ -92,7 +100,11 @@ inline void MacroAssembler::storePtr(ImmPtr imm, const Address& address) {
     uintptr_t val = uintptr_t(imm.value);
     if (auto slot = aotTable().findSlot(val)) {
       ScratchRegisterScope scratch(*this);
-      emitAOTSlotLoad(*slot, scratch);
+      if (IsAOTLinkSlot(*slot)) {
+        emitAOTLinkAddress(*slot, scratch);
+      } else {
+        emitAOTSlotLoad(*slot, scratch);
+      }
       MacroAssemblerSpecific::storePtr(scratch, address);
       return;
     }
@@ -109,7 +121,11 @@ inline void MacroAssembler::storePtr(Register src, AbsoluteAddress address) {
     uintptr_t val = uintptr_t(address.addr);
     if (auto slot = aotTable().findSlot(val)) {
       ScratchRegisterScope scratch(*this);
-      emitAOTSlotLoad(*slot, scratch);
+      if (IsAOTLinkSlot(*slot)) {
+        emitAOTLinkAddress(*slot, scratch);
+      } else {
+        emitAOTSlotLoad(*slot, scratch);
+      }
       MacroAssemblerSpecific::storePtr(src, Address(scratch, 0));
       return;
     }

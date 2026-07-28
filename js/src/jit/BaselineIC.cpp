@@ -52,12 +52,6 @@ using mozilla::DebugOnly;
 namespace js {
 namespace jit {
 
-bool ICStub::isStaticCode() const {
-  // The current implementation returns false because embedded code is not
-  // loaded.
-  return false;
-}
-
 // Class used to emit all Baseline IC fallback code when initializing the
 // JitRuntime.
 class MOZ_RAII FallbackICCodeCompiler final {

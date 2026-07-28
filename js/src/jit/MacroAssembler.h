@@ -7,6 +7,7 @@
 
 #include "mozilla/MacroForEach.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Span.h"
 #include "mozilla/Variant.h"
 
 #if defined(JS_CODEGEN_X86)
@@ -360,6 +361,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #ifdef ENABLE_JS_AOT
   AOTIndirectionTable* aotTable_ = nullptr;
   bool inAOTStubFrame_ = false;
+  Vector<AOTLinkSite, 0, SystemAllocPolicy> aotLinkSites_;
 #endif
 
   // Labels for handling exceptions and failures.
@@ -413,6 +415,18 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void emitAOTLoadTableBase(Register dest);
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
+
+  // Reach a link slot with a rip relative instruction whose displacement is
+  // left zero and recorded as a link site. The next build's static linker
+  // supplies the displacement, so generated code skips the table load. Only
+  // valid for slots IsAOTLinkSlot accepts.
+  void emitAOTLinkAddress(AOTSlot slot, Register dest);
+  void emitAOTLinkLoad(AOTSlot slot, Register dest);
+
+  mozilla::Span<const AOTLinkSite> aotLinkSites() const {
+    return {aotLinkSites_.begin(), aotLinkSites_.length()};
+  }
+
   void loadZoneForAOT(Register dest);
   void callPreBarrierAOT(MIRType type, Register scratch);
   void emitAOTDispatch(Register opcodeReg, Register tableReg);

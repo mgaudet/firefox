@@ -191,15 +191,7 @@ class ICStub {
     return isFallback();
   }
 
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
-  JitCode* jitCode() {
-    MOZ_ASSERT(!usesTrampolineCode());
-    return JitCode::FromExecutable(stubCode_);
-  }
-  bool hasJitCode() { return !!stubCode_; }
-#else  // !ENABLE_PORTABLE_BASELINE_INTERP
-  JitCode* jitCode() { return nullptr; }
-  bool hasJitCode() { return false; }
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP
   uint8_t* rawJitCode() const { return stubCode_; }
   void updateRawJitCode(uint8_t* ptr) { stubCode_ = ptr; }
 #endif
@@ -208,11 +200,6 @@ class ICStub {
   inline void incrementEnteredCount() { enteredCount_++; }
   void setEnteredCount(uint32_t count) { enteredCount_ = count; }
   void resetEnteredCount() { enteredCount_ = 0; }
-
-  // True if stubCode_ points into the AOT text segment (which has no
-  // JitCodeHeader in front, so JitCode::FromExecutable is invalid).
-  // Always false until the AOT loader is in place.
-  bool isStaticCode() const;
 
   static constexpr size_t offsetOfStubCode() {
     return offsetof(ICStub, stubCode_);
@@ -301,8 +288,17 @@ class ICCacheIRStub final : public ICStub {
     MOZ_ASSERT_IF(!IsPortableBaselineInterpreterEnabled(), stubCode);
   }
 
+  // Only CacheIR stubs own a JitCode. Fallback stubs share runtime-wide
+  // trampoline code, so this deliberately does not exist on the base class.
 #ifdef ENABLE_JS_AOT
   JitCode* jitCode() { return jitCode_; }
+  bool hasJitCode() { return !!jitCode_; }
+#elif !defined(ENABLE_PORTABLE_BASELINE_INTERP)
+  JitCode* jitCode() { return JitCode::FromExecutable(stubCode_); }
+  bool hasJitCode() { return !!stubCode_; }
+#else
+  JitCode* jitCode() { return nullptr; }
+  bool hasJitCode() { return false; }
 #endif
 
   ICStub* next() const { return next_; }

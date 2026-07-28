@@ -4,6 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// AOT_LINK_SLOT marks a slot whose expression is a constant expression naming
+// a symbol in this binary. Such slots behave exactly like AOT_SLOT at runtime
+// but generated code may reference them through a relocation resolved by the
+// static linker instead of an indirection table load. The expression must be
+// spellable outside any class it belongs to, because AOTLinkSyms.h repeats it
+// at namespace scope. The symbol must also be hidden: an exported one may be
+// interposed, so its address is not fixed until load time and the link fails.
+
+// TODO(Justin): Reorganize the order of different slot types, currently messy.
+
 // Runtime
 
 AOT_SLOT(JSRuntimePtr,           rt)
@@ -50,35 +60,41 @@ AOT_ATOM_SLOT(AtomObject,             static_cast<JSString*>(cx->names().object)
 
 // JavaScript class pointers
 
-AOT_SLOT(Class_WithEnvironment,              &WithEnvironmentObject::class_)
-AOT_SLOT(Class_Function,                     &FunctionClass)
-AOT_SLOT(Class_ExtendedFunction,             &ExtendedFunctionClass)
-AOT_SLOT(Class_Array,                        &ArrayObject::class_)
-AOT_SLOT(Class_PlainObject,                  &PlainObject::class_)
-AOT_SLOT(Class_FixedLengthArrayBuffer,       &FixedLengthArrayBufferObject::class_)
-AOT_SLOT(Class_ImmutableArrayBuffer,         &ImmutableArrayBufferObject::class_)
-AOT_SLOT(Class_ResizableArrayBuffer,         &ResizableArrayBufferObject::class_)
-AOT_SLOT(Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_)
-AOT_SLOT(Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_)
-AOT_SLOT(Class_FixedLengthDataView,          &FixedLengthDataViewObject::class_)
-AOT_SLOT(Class_ImmutableDataView,            &ImmutableDataViewObject::class_)
-AOT_SLOT(Class_ResizableDataView,            &ResizableDataViewObject::class_)
-AOT_SLOT(Class_MappedArguments,              &MappedArgumentsObject::class_)
-AOT_SLOT(Class_UnmappedArguments,            &UnmappedArgumentsObject::class_)
-AOT_SLOT(Class_BoundFunction,                &BoundFunctionObject::class_)
-AOT_SLOT(Class_PropertyIterator,             &PropertyIteratorObject::class_)
-AOT_SLOT(Class_Set,                          &SetObject::class_)
-AOT_SLOT(Class_Map,                          &MapObject::class_)
-AOT_SLOT(Class_Date,                         &DateObject::class_)
-AOT_SLOT(Class_WeakMap,                      &WeakMapObject::class_)
-AOT_SLOT(Class_WeakSet,                      &WeakSetObject::class_)
-AOT_SLOT(Class_Generator,                    &GeneratorObject::class_)
+AOT_LINK_SLOT(Class_WithEnvironment,              &WithEnvironmentObject::class_)
+AOT_LINK_SLOT(Class_Function,                     &FunctionClass)
+AOT_LINK_SLOT(Class_ExtendedFunction,             &ExtendedFunctionClass)
+AOT_LINK_SLOT(Class_Array,                        &ArrayObject::class_)
+AOT_LINK_SLOT(Class_PlainObject,                  &PlainObject::class_)
+AOT_LINK_SLOT(Class_FixedLengthArrayBuffer,       &FixedLengthArrayBufferObject::class_)
+AOT_LINK_SLOT(Class_ImmutableArrayBuffer,         &ImmutableArrayBufferObject::class_)
+AOT_LINK_SLOT(Class_ResizableArrayBuffer,         &ResizableArrayBufferObject::class_)
+AOT_LINK_SLOT(Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_)
+AOT_LINK_SLOT(Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_)
+AOT_LINK_SLOT(Class_FixedLengthDataView,          &FixedLengthDataViewObject::class_)
+AOT_LINK_SLOT(Class_ImmutableDataView,            &ImmutableDataViewObject::class_)
+AOT_LINK_SLOT(Class_ResizableDataView,            &ResizableDataViewObject::class_)
+AOT_LINK_SLOT(Class_MappedArguments,              &MappedArgumentsObject::class_)
+AOT_LINK_SLOT(Class_UnmappedArguments,            &UnmappedArgumentsObject::class_)
+AOT_LINK_SLOT(Class_BoundFunction,                &BoundFunctionObject::class_)
+AOT_LINK_SLOT(Class_PropertyIterator,             &PropertyIteratorObject::class_)
+AOT_LINK_SLOT(Class_Set,                          &SetObject::class_)
+AOT_LINK_SLOT(Class_Map,                          &MapObject::class_)
+AOT_LINK_SLOT(Class_Date,                         &DateObject::class_)
+AOT_LINK_SLOT(Class_WeakMap,                      &WeakMapObject::class_)
+AOT_LINK_SLOT(Class_WeakSet,                      &WeakSetObject::class_)
+AOT_LINK_SLOT(Class_Generator,                    &GeneratorObject::class_)
+
+// Supplied by the embedder rather than defined here.
 AOT_SLOT(Class_WindowProxy,                  rt->maybeWindowProxyClass())
 
 // Other pointers
-
-AOT_SLOT(Ptr_DeadObjectProxy,               &DeadObjectProxy::singleton)
+AOT_LINK_SLOT(Ptr_DeadObjectProxy,          &DeadObjectProxy::singleton)
+AOT_LINK_SLOT(Ptr_MathRandomScaleInv,       &js::jit::MathRandomScaleInv)
 AOT_SLOT(Ptr_WrapperFamily,                 &js::Wrapper::family)
+
+// The following resolve to file static objects, private members, embedder
+// supplied addresses, or exported symbols, so they have no spelling the linker
+// can bind.
 AOT_SLOT(Ptr_EmptyObjectSlots,              emptyObjectSlots)
 AOT_SLOT(Ptr_EmptyObjectElements,           emptyObjectElements)
 AOT_SLOT(Ptr_StaticStrings_Unit,            &cx->staticStrings().unitStaticTable)
@@ -87,25 +103,24 @@ AOT_SLOT(Ptr_StaticStrings_Int,             &cx->staticStrings().intStaticTable)
 AOT_SLOT(Ptr_StaticStrings_SmallChar,       &StaticStrings::toSmallCharTable.storage)
 AOT_SLOT(Ptr_DateTimeInfo_UTCOffset,        DateTimeInfo::addressOfUTCToLocalOffsetSeconds())
 AOT_SLOT(Ptr_DOMProxyHandlerFamily,         GetDOMProxyHandlerFamily())
-AOT_SLOT(Ptr_MathRandomScaleInv,            &js::jit::MathRandomScaleInv)
 
 // The three typed array class tables are contiguous. Add an indirection slot
 // for every address that range checks and type dispatch may access.
-AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Begin,       std::begin(TypedArrayObject::fixedLengthClasses))
-AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_End,         std::end(TypedArrayObject::fixedLengthClasses))
-AOT_SLOT(Ptr_TypedArrayClasses_Immutable_LastElem,      std::prev(std::end(TypedArrayObject::immutableClasses)))
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Begin,         std::begin(TypedArrayObject::resizableClasses))
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable_End,           std::end(TypedArrayObject::resizableClasses))
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable_LastElem,      std::prev(std::end(TypedArrayObject::resizableClasses)))
-AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Int16,       &TypedArrayObject::fixedLengthClasses[Scalar::Int16])
-AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Int32,       &TypedArrayObject::fixedLengthClasses[Scalar::Int32])
-AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Float64,     &TypedArrayObject::fixedLengthClasses[Scalar::Float64])
-AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Uint8Clamped, &TypedArrayObject::fixedLengthClasses[Scalar::Uint8Clamped])
-AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_BigInt64,    &TypedArrayObject::fixedLengthClasses[Scalar::BigInt64])
-AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Float16,     &TypedArrayObject::fixedLengthClasses[Scalar::Float16])
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Int16,         &TypedArrayObject::resizableClasses[Scalar::Int16])
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Int32,         &TypedArrayObject::resizableClasses[Scalar::Int32])
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float64,       &TypedArrayObject::resizableClasses[Scalar::Float64])
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Uint8Clamped,  &TypedArrayObject::resizableClasses[Scalar::Uint8Clamped])
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable_BigInt64,      &TypedArrayObject::resizableClasses[Scalar::BigInt64])
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float16,       &TypedArrayObject::resizableClasses[Scalar::Float16])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_FixedLength_Begin,       std::begin(TypedArrayObject::fixedLengthClasses))
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_FixedLength_End,         std::end(TypedArrayObject::fixedLengthClasses))
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Immutable_LastElem,      std::prev(std::end(TypedArrayObject::immutableClasses)))
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_Begin,         std::begin(TypedArrayObject::resizableClasses))
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_End,           std::end(TypedArrayObject::resizableClasses))
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_LastElem,      std::prev(std::end(TypedArrayObject::resizableClasses)))
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_FixedLength_Int16,       &TypedArrayObject::fixedLengthClasses[Scalar::Int16])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_FixedLength_Int32,       &TypedArrayObject::fixedLengthClasses[Scalar::Int32])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_FixedLength_Float64,     &TypedArrayObject::fixedLengthClasses[Scalar::Float64])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_FixedLength_Uint8Clamped, &TypedArrayObject::fixedLengthClasses[Scalar::Uint8Clamped])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_FixedLength_BigInt64,    &TypedArrayObject::fixedLengthClasses[Scalar::BigInt64])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_FixedLength_Float16,     &TypedArrayObject::fixedLengthClasses[Scalar::Float16])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_Int16,         &TypedArrayObject::resizableClasses[Scalar::Int16])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_Int32,         &TypedArrayObject::resizableClasses[Scalar::Int32])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_Float64,       &TypedArrayObject::resizableClasses[Scalar::Float64])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_Uint8Clamped,  &TypedArrayObject::resizableClasses[Scalar::Uint8Clamped])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_BigInt64,      &TypedArrayObject::resizableClasses[Scalar::BigInt64])
+AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_Float16,       &TypedArrayObject::resizableClasses[Scalar::Float16])

@@ -7,19 +7,29 @@ FINAL_LIBRARY = "js"
 include("../../js-config.mozbuild")
 include("../../js-cxxflags.mozbuild")
 
-# The .S file needs the image sitting next to it at assemble time.
-# Using a .inc suffix (rather than .bin) puts this GeneratedFile in
-# mozbuild's pre-compile tier, so it exists before the .S is assembled.
+# The shim needs the image and its relocation list sitting next to it at
+# compile time. Using a .inc suffix (rather than .bin) puts these
+# GeneratedFiles in mozbuild's pre-compile tier, so they exist before the shim
+# is compiled.
 GeneratedFile(
     "AOTImage.inc",
     script="GenerateEmptyAOTImage.py",
+    entry_point="main",
+    inputs=[],
+)
+
+GeneratedFile(
+    "AOTImageRelocs.inc",
+    script="GenerateEmptyAOTImage.py",
+    entry_point="main_relocs",
     inputs=[],
 )
 
 SOURCES += [
-    "AOTImageIncbin.S",
+    "AOTImageIncbin.cpp",
 ]
 
-# The assembler searches for the generated image relative to the object
-# directory.
-LOCAL_INCLUDES += ["!."]
+# Both the preprocessor and the assembler search for the generated files
+# relative to the object directory. Engine headers are spelled relative to the
+# js/src root, two levels up.
+LOCAL_INCLUDES += ["!.", "!../..", "../.."]

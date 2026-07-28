@@ -13,9 +13,8 @@
 #  include "jit/JitOptions.h"
 #  include "jit/JitSpewer.h"
 
-// Symbols exported by js/src/jit/aot/AOTImageIncbin.S. The .S file
-// .incbins the AOTImage.bin (real or empty placeholder) generated
-// into the objdir by GenerateEmptyAOTImage.py.
+// Symbols exported by the image shim, which embeds either a recorded image or
+// the empty placeholder the build generates into the objdir.
 extern "C" {
 extern const uint8_t aot_image_start[];
 extern const uint8_t aot_image_end[];
