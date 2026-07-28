@@ -11898,28 +11898,29 @@ void CodeGenerator::visitModD(LModD* ins) {
   Register temp1 = ToRegister(ins->temp0());
   Register temp2 = ToRegister(ins->temp1());
 
-  MOZ_ASSERT(output == ReturnDoubleReg);
+  LiveRegisterSet liveRegisterSet = liveVolatileRegs(ins);
 
   Label call, done;
   // The fast path's internal integer division may itself call out to a runtime
   // routine (on ARM without a hardware divide), and needs the volatile live set
-  // to know which of our registers to preserve across that call. 
-  masm.modDoubleIntegerFastPath(lhs, rhs, output, temp1, temp2,
-                                LiveRegisterSet(RegisterSet::Volatile()),
+  // to know which of our registers to preserve across that call.
+  masm.modDoubleIntegerFastPath(lhs, rhs, output, temp1, temp2, liveRegisterSet,
                                 &call);
   masm.jump(&done);
 
-  // Because this is a call instruction, the register allocator already treats
-  // every volatile register as clobbered across LModD, so the js::NumberMod
-  // fallback needs no manual save/restore: the result is returned directly in
-  // ReturnDoubleReg == output.
   masm.bind(&call);
   {
+    LiveRegisterSet save = liveRegisterSet;
+    save.takeUnchecked(output);
+
+    masm.PushRegsInMask(save);
     using Fn = double (*)(double a, double b);
-    masm.setupAlignedABICall();
+    masm.setupUnalignedABICall(temp1);
     masm.passABIArg(lhs, ABIType::Float64);
     masm.passABIArg(rhs, ABIType::Float64);
     masm.callWithABI<Fn, NumberMod>(ABIType::Float64);
+    masm.storeCallFloatResult(output);
+    masm.PopRegsInMask(save);
   }
 
   masm.bind(&done);

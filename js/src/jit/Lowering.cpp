@@ -2577,13 +2577,13 @@ void LIRGenerator::visitMod(MMod* ins) {
       }
     }
 
-    // LModD is a call instruction, so its temps must use a fixed register
-    // policy. CallTempReg1/CallTempReg2 are used to avoid the fixed registers
-    // the integer-division fast path needs on x86/x64 (rax/rdx).
+
     LModD* lir = new (alloc())
-        LModD(useRegisterAtStart(ins->lhs()), useRegisterAtStart(ins->rhs()),
-              tempFixed(CallTempReg1), tempFixed(CallTempReg2));
-    defineReturn(lir, ins);
+        LModD(useRegister(ins->lhs()), useRegister(ins->rhs()),
+              temp(), temp());
+
+    assignSafepoint(lir, ins);
+    define(lir, ins);
     return;
   }
 
