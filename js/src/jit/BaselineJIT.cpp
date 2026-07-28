@@ -600,6 +600,10 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
+  if (JitOptions.aotSelfHostedBaselineOnly && !script->selfHosted()) {
+    return Method_Skipped;
+  }
+
   // Debuggee code contains runtime trap edits. A static copy would become stale
   // when the first breakpoint is installed.
   if (JitOptions.useAOTImage && !script->isDebuggee()) {
