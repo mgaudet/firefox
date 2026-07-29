@@ -97,7 +97,7 @@
 #endif
 
 #ifdef ENABLE_JS_AOT
-#  include "jit/ABIFunctionList-inl.h"
+#  include "jit/AOTABIFns-inl.h"
 #endif
 #include "gc/GC-inl.h"
 #include "gc/StableCellHasher-inl.h"
@@ -153,6 +153,28 @@ bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
 
   JSRuntime* rt = cx->runtime();
 
+  // TODO: Encapsulate table population in dedicated helpers and keep direct
+  // entry mutation private.
+
+  // Order fixes the slot index, and recorded code may name an index either
+  // through the table or through a link site, so the list is append-only and
+  // lives where both this and the image shim can expand it.
+  uint32_t abiIdx = 0;
+  auto setABI = [&](auto fp) {
+    aotIndirectionTable_.set(AOTSlotForABIFn(abiIdx++),
+                             uintptr_t(JS_FUNC_TO_DATA_PTR(void*, fp)));
+  };
+
+#  define AOT_ABIFN(fp) setABI(fp);
+#  define AOT_ABIFN_NOLINK(fp) setABI(fp);
+#  define AOT_ABIFN_TYPED(fp, ...) setABI(static_cast<__VA_ARGS__>(fp));
+#  include "jit/AOTABIFns.tbl"
+#  undef AOT_ABIFN_TYPED
+#  undef AOT_ABIFN_NOLINK
+#  undef AOT_ABIFN
+
+  MOZ_RELEASE_ASSERT(abiIdx == kAOTABIFnCount);
+
   // TODO: Factor named slot population into its own helper.
 #  define AOT_SLOT(name, expr) \
     aotIndirectionTable_.set(AOTSlot::name, uintptr_t(expr));
@@ -162,61 +184,6 @@ bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
 #  undef AOT_LINK_SLOT
 #  undef AOT_ATOM_SLOT
 #  undef AOT_SLOT
-
-  // TODO: Encapsulate table population in dedicated helpers and keep direct
-  // entry mutation private.
-
-  // ABI functions reachable via callWithABI<Fn, cppFn>. Order here fixes
-  // the slot index; adding entries in the middle shifts every subsequent
-  // slot, so append-only unless you also rebuild any container that
-  // baked in these indices.
-  uint32_t abiIdx = 0;
-  auto setABI = [&](auto fp) {
-    aotIndirectionTable_.set(AOTSlotForABIFn(abiIdx++),
-                             uintptr_t(JS_FUNC_TO_DATA_PTR(void*, fp)));
-  };
-
-#  define EMIT_ABI(fp) setABI(fp);
-  ABIFUNCTION_LIST(EMIT_ABI)
-#  undef EMIT_ABI
-#  define EMIT_ABI_TYPED(fp, ...) setABI(static_cast<__VA_ARGS__>(fp));
-  ABIFUNCTION_AND_TYPE_LIST(EMIT_ABI_TYPED)
-#  undef EMIT_ABI_TYPED
-
-  // Store dynamically selected function pointers separately from the fixed ABI
-  // function list.
-  for (uint8_t i = uint8_t(UnaryMathFunction::SinNative);
-       i <= uint8_t(UnaryMathFunction::Round); i++) {
-    setABI(GetUnaryMathFunctionPtr(UnaryMathFunction(i)));
-  }
-
-  static constexpr Scalar::Type AtomicsTypes[] = {
-      Scalar::Int8,   Scalar::Uint8, Scalar::Int16,
-      Scalar::Uint16, Scalar::Int32, Scalar::Uint32};
-  auto emitAtomicsGroup = [&](auto fn) {
-    for (Scalar::Type ty : AtomicsTypes) setABI(fn(ty));
-  };
-  emitAtomicsGroup(AtomicsCompareExchange);
-  emitAtomicsGroup(AtomicsExchange);
-  emitAtomicsGroup(AtomicsAdd);
-  emitAtomicsGroup(AtomicsSub);
-  emitAtomicsGroup(AtomicsAnd);
-  emitAtomicsGroup(AtomicsOr);
-  emitAtomicsGroup(AtomicsXor);
-
-  setABI(ArrayConstructor);
-#  define EMIT_TA_CTOR(_, T, N) setABI(TypedArrayConstructorNative(Scalar::N));
-  JS_FOR_EACH_TYPED_ARRAY(EMIT_TA_CTOR)
-#  undef EMIT_TA_CTOR
-
-  using BigIntCompareFn = bool (*)(BigInt*, BigInt*);
-  setABI(static_cast<BigIntCompareFn>(BigIntEqual<EqualityKind::Equal>));
-  setABI(static_cast<BigIntCompareFn>(BigIntEqual<EqualityKind::NotEqual>));
-  setABI(static_cast<BigIntCompareFn>(BigIntCompare<ComparisonKind::LessThan>));
-  setABI(static_cast<BigIntCompareFn>(
-      BigIntCompare<ComparisonKind::GreaterThanOrEqual>));
-
-  MOZ_RELEASE_ASSERT(abiIdx <= AOTMaxABIFunctions, "raise AOTMaxABIFunctions");
 
   // Populate wrapper entries using offsets recorded while generating
   // trampolines.

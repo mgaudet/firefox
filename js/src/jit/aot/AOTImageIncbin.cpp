@@ -21,8 +21,8 @@
  * order. The function is never called; only its assembly matters.
  */
 
-#include "jit/AOT.h"
-#include "jit/AOTLinkSyms.h"
+#include "jit/AOTABIFns-inl.h"
+#include "jit/AOTLinkSyms-inl.h"
 
 extern "C" {
 extern const uint8_t aot_image_start[];
@@ -40,7 +40,7 @@ namespace {
 
 // Zero means the build has no recorded image to check.
 #define AOT_IMAGE_SLOT_TABLE_HASH(hash)                      \
-  static_assert((hash) == 0 || (hash) == AOTSlotTableHash(), \
+  static_assert((hash) == 0 || (hash) == AOTImageLinkHash(), \
                 "AOT image was recorded against a different slot table");
 
 #define AOT_IMAGE_CHUNK(offset, length)                  \

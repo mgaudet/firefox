@@ -67,16 +67,12 @@ inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
   return AOTSlot(uint32_t(AOTSlot::VMWrapper_Begin) + id);
 }
 
-inline AOTSlot AOTSlotForABIFn(uint32_t idx) {
+constexpr AOTSlot AOTSlotForABIFn(uint32_t idx) {
   MOZ_ASSERT(idx < AOTMaxABIFunctions);
   return AOTSlot(uint32_t(AOTSlot::ABIFn_Begin) + idx);
 }
 
-// True when the slot's value is fixed at link time, so generated code can
-// reference it with a relocation the static linker resolves rather than an
-// indirection table load. AOTLinkSyms.h must carry a specialization for every
-// such slot.
-constexpr bool IsAOTLinkSlot(AOTSlot slot) {
+constexpr bool IsNamedAOTLinkSlot(AOTSlot slot) {
   switch (slot) {
 #define AOT_SLOT(name, ...)
 #define AOT_ATOM_SLOT(name, ...)
@@ -90,6 +86,13 @@ constexpr bool IsAOTLinkSlot(AOTSlot slot) {
       return false;
   }
 }
+
+// True when the slot's value is fixed at link time, so generated code can
+// reference it with a relocation the static linker resolves rather than an
+// indirection table load. The image shim must carry a specialization for every
+// such slot. Out of line because the ABI function half of the answer comes
+// from a table too heavy to pull into every macro assembler consumer.
+bool IsAOTLinkSlot(AOTSlot slot);
 
 // Identifies the slot numbering this build compiles against. Link sites name
 // slots by index, so an image recorded against a different numbering would

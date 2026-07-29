@@ -19,6 +19,8 @@
 #  include "jit/x64/Assembler-x64.h"
 #endif
 
+#include "jit/AOTABIFns-inl.h"
+
 namespace js::jit {
 
 const char* AOTSlotName(AOTSlot slot) {
@@ -50,6 +52,20 @@ const char* AOTSlotName(AOTSlot slot) {
     return "ABIFn";
   }
   return "Unknown";
+}
+
+bool IsAOTLinkSlot(AOTSlot slot) {
+  if (IsNamedAOTLinkSlot(slot)) {
+    return true;
+  }
+#ifdef JS_CODEGEN_X64
+  uint32_t s = uint32_t(slot);
+  if (s >= uint32_t(AOTSlot::ABIFn_Begin) && s < uint32_t(AOTSlot::ABIFn_End)) {
+    uint32_t idx = s - uint32_t(AOTSlot::ABIFn_Begin);
+    return idx < kAOTABIFnCount && kAOTABIFnLinkable[idx];
+  }
+#endif
+  return false;
 }
 
 mozilla::Maybe<AOTSlot> AOTIndirectionTable::findSlot(uintptr_t value) const {

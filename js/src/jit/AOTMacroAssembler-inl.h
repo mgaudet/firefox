@@ -142,8 +142,7 @@ inline void MacroAssembler::jump(TrampolinePtr code) {
     uintptr_t val = uintptr_t(code.value);
     if (auto slot = aotTable().findSlot(val)) {
       ScratchRegisterScope scratch(*this);
-      emitAOTSlotLoad(*slot, scratch);
-      MacroAssemblerSpecific::jump(scratch);
+      emitAOTSlotJump(*slot, scratch);
       return;
     }
     AOT_CRASH_ON_UNKNOWN_PTR("jump(TrampolinePtr)", val);

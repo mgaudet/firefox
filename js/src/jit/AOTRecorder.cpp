@@ -34,6 +34,7 @@
 #  include "vm/JSScript.h"
 #  include "vm/Runtime.h"
 
+#  include "jit/AOTABIFns-inl.h"
 #  include "jit/JitScript-inl.h"
 #  include "vm/JSObject-inl.h"
 
@@ -109,7 +110,7 @@ bool AOTArtifactRecorder::writeBlobFile(
   hdr.arraysSize = uint32_t(blob.arrays().size());
   hdr.codeSize = uint32_t(blob.code().size());
   hdr.linkSitesSize = uint32_t(sites.size() * sizeof(AOTLinkSite));
-  hdr.slotTableHash = AOTSlotTableHash();
+  hdr.slotTableHash = AOTImageLinkHash();
 
   auto writeBytes = [&](const void* p, size_t n) -> bool {
     const uint8_t* cur = static_cast<const uint8_t*>(p);

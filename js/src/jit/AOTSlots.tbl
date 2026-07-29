@@ -8,7 +8,7 @@
 // a symbol in this binary. Such slots behave exactly like AOT_SLOT at runtime
 // but generated code may reference them through a relocation resolved by the
 // static linker instead of an indirection table load. The expression must be
-// spellable outside any class it belongs to, because AOTLinkSyms.h repeats it
+// spellable outside any class it belongs to, because the image shim repeats it
 // at namespace scope. The symbol must also be hidden: an exported one may be
 // interposed, so its address is not fixed until load time and the link fails.
 

@@ -1,0 +1,91 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// Every function reachable through callWithABI, in the order that fixes its
+// indirection slot index. Both the runtime table population and the image
+// shim's relocation symbols expand this list in one pass, so a recorded index
+// cannot drift away from the function it was captured against.
+//
+// AOT_ABIFN entries name a definition the static linker resolves, letting
+// recorded code call it directly. AOT_ABIFN_NOLINK entries have no such
+// address: they are either preemptible or selected from definitions that are
+// private to another translation unit, so they keep the table load.
+// AOT_ABIFN_TYPED disambiguates an overload set.
+
+#define AOT_ABIFN_LOCAL_ENTRY(fp) AOT_ABIFN(fp)
+ABIFUNCTION_LOCAL_LIST(AOT_ABIFN_LOCAL_ENTRY)
+#undef AOT_ABIFN_LOCAL_ENTRY
+
+#define AOT_ABIFN_PREEMPTIBLE_ENTRY(fp) AOT_ABIFN_NOLINK(fp)
+ABIFUNCTION_PREEMPTIBLE_LIST(AOT_ABIFN_PREEMPTIBLE_ENTRY)
+#undef AOT_ABIFN_PREEMPTIBLE_ENTRY
+
+#define AOT_ABIFN_TYPED_ENTRY(fp, ...) AOT_ABIFN_TYPED(fp, __VA_ARGS__)
+ABIFUNCTION_AND_TYPE_LIST(AOT_ABIFN_TYPED_ENTRY)
+#undef AOT_ABIFN_TYPED_ENTRY
+
+// Matches the declaration order of the unary math function enum. An entry
+// missing here makes recording crash on the unmapped pointer rather than
+// silently binding to the wrong slot.
+AOT_ABIFN(js::math_sin_native_impl)
+AOT_ABIFN(js::math_sin_fdlibm_impl)
+AOT_ABIFN(js::math_cos_native_impl)
+AOT_ABIFN(js::math_cos_fdlibm_impl)
+AOT_ABIFN(js::math_tan_native_impl)
+AOT_ABIFN(js::math_tan_fdlibm_impl)
+AOT_ABIFN(js::math_log_impl)
+AOT_ABIFN(js::math_exp_impl)
+AOT_ABIFN(js::math_acos_impl)
+AOT_ABIFN(js::math_asin_impl)
+AOT_ABIFN(js::math_atan_impl)
+AOT_ABIFN(js::math_log10_impl)
+AOT_ABIFN(js::math_log2_impl)
+AOT_ABIFN(js::math_log1p_impl)
+AOT_ABIFN(js::math_expm1_impl)
+AOT_ABIFN(js::math_cosh_impl)
+AOT_ABIFN(js::math_sinh_impl)
+AOT_ABIFN(js::math_tanh_impl)
+AOT_ABIFN(js::math_acosh_impl)
+AOT_ABIFN(js::math_asinh_impl)
+AOT_ABIFN(js::math_atanh_impl)
+AOT_ABIFN(js::math_trunc_impl)
+AOT_ABIFN(js::math_cbrt_impl)
+AOT_ABIFN(js::math_floor_impl)
+AOT_ABIFN(js::math_ceil_impl)
+AOT_ABIFN(js::math_round_impl)
+
+#define AOT_ABIFN_ATOMICS_GROUP(fn)                     \
+  AOT_ABIFN_NOLINK(js::jit::fn(Scalar::Int8))           \
+  AOT_ABIFN_NOLINK(js::jit::fn(Scalar::Uint8))          \
+  AOT_ABIFN_NOLINK(js::jit::fn(Scalar::Int16))          \
+  AOT_ABIFN_NOLINK(js::jit::fn(Scalar::Uint16))         \
+  AOT_ABIFN_NOLINK(js::jit::fn(Scalar::Int32))          \
+  AOT_ABIFN_NOLINK(js::jit::fn(Scalar::Uint32))
+AOT_ABIFN_ATOMICS_GROUP(AtomicsCompareExchange)
+AOT_ABIFN_ATOMICS_GROUP(AtomicsExchange)
+AOT_ABIFN_ATOMICS_GROUP(AtomicsAdd)
+AOT_ABIFN_ATOMICS_GROUP(AtomicsSub)
+AOT_ABIFN_ATOMICS_GROUP(AtomicsAnd)
+AOT_ABIFN_ATOMICS_GROUP(AtomicsOr)
+AOT_ABIFN_ATOMICS_GROUP(AtomicsXor)
+#undef AOT_ABIFN_ATOMICS_GROUP
+
+AOT_ABIFN(js::ArrayConstructor)
+
+#define AOT_ABIFN_TA_CTOR(_, T, N) \
+  AOT_ABIFN_NOLINK(js::TypedArrayConstructorNative(Scalar::N))
+JS_FOR_EACH_TYPED_ARRAY(AOT_ABIFN_TA_CTOR)
+#undef AOT_ABIFN_TA_CTOR
+
+AOT_ABIFN_TYPED(js::jit::BigIntEqual<js::jit::EqualityKind::Equal>,
+                bool (*)(JS::BigInt*, JS::BigInt*))
+AOT_ABIFN_TYPED(js::jit::BigIntEqual<js::jit::EqualityKind::NotEqual>,
+                bool (*)(JS::BigInt*, JS::BigInt*))
+AOT_ABIFN_TYPED(js::jit::BigIntCompare<js::jit::ComparisonKind::LessThan>,
+                bool (*)(JS::BigInt*, JS::BigInt*))
+AOT_ABIFN_TYPED(
+    js::jit::BigIntCompare<js::jit::ComparisonKind::GreaterThanOrEqual>,
+    bool (*)(JS::BigInt*, JS::BigInt*))

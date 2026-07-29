@@ -95,9 +95,11 @@ namespace jit {
 #  define ABIFUNCTION_FUZZILLI_LIST(_)
 #endif
 
-#define ABIFUNCTION_LIST(_)                                                    \
+// Split by symbol linkage. A definition the dynamic linker is allowed to
+// replace has no address until load time, so only the local half can be
+// reached through a relocation the static linker resolves.
+#define ABIFUNCTION_LOCAL_LIST(_)                                              \
   ABIFUNCTION_JS_GC_PROBES_LIST(_)                                             \
-  ABIFUNCTION_JS_CODEGEN_ARM_LIST(_)                                           \
   ABIFUNCTION_WASM_CODEGEN_DEBUG_LIST(_)                                       \
   _(js::ArgumentsObject::finishForIonPure)                                     \
   _(js::ArgumentsObject::finishInlineForIonPure)                               \
@@ -210,11 +212,18 @@ namespace jit {
   _(js::TypeOfObject)                                                          \
   _(js::WeakMapObject::getObject)                                              \
   _(js::WeakMapObject::hasObject)                                              \
-  _(js::WeakSetObject::hasObject)                                              \
-  _(mozilla::SIMD::memchr16)                                                   \
-  _(mozilla::SIMD::memchr2x16)                                                 \
-  _(mozilla::SIMD::memchr2x8)                                                  \
+  _(js::WeakSetObject::hasObject)
+
+#define ABIFUNCTION_PREEMPTIBLE_LIST(_) \
+  ABIFUNCTION_JS_CODEGEN_ARM_LIST(_)    \
+  _(mozilla::SIMD::memchr16)            \
+  _(mozilla::SIMD::memchr2x16)          \
+  _(mozilla::SIMD::memchr2x8)           \
   _(mozilla::SIMD::memchr8)
+
+#define ABIFUNCTION_LIST(_) \
+  ABIFUNCTION_LOCAL_LIST(_) \
+  ABIFUNCTION_PREEMPTIBLE_LIST(_)
 
 // List of all ABI functions to be used with callWithABI, which are
 // overloaded. Each entry stores the fully qualified name of the C++ function,
