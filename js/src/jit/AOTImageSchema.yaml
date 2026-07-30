@@ -8,84 +8,56 @@
 # generator uses it to create matching metadata structures and serialization
 # helpers. Readers and writers share the same schema.
 #
-# Fixed fields use unsigned integer or raw byte types. Arrays identify their
-# element type and the field containing their length. Metadata mappings describe
-# how serialized fields correspond to the hand written metadata representation.
+# A blob declares its fixed fields and its trailing arrays. Both are written as
+# a single "type: member" pair, where member is the path to the corresponding
+# member of the hand written metadata type. Fixed fields use unsigned integer
+# types; arrays name their C++ element type.
+#
+# Everything else is derived. A blob's kind identifier is its position in this
+# file and must agree with the runtime enumeration. Each array contributes a
+# u32 element count, appended to the fixed fields in array order. Alignment
+# padding is inserted so that the serialized form has no implicit padding.
 #
 # Increment the image format version whenever the schema changes.
 
 blobs:
   BaselineInterpreter:
-    kind_id: 0 # NOTE: name or get rid of kind_id
     doc: "Singleton baseline interpreter blob."
     metadata_type: "js::jit::BaselineInterpreterMetadata"
     fields:
-      - {name: interpretOpOffset,            type: u32, cpp_member: interpretOpOffset}
-      - {name: interpretOpNoDebugTrapOffset, type: u32, cpp_member: interpretOpNoDebugTrapOffset}
-      - {name: bailoutPrologueOffset,        type: u32, cpp_member: bailoutPrologueOffset}
-      - {name: profilerEnterToggleOffset,    type: u32, cpp_member: profilerEnterToggleOffset}
-      - {name: profilerExitToggleOffset,     type: u32, cpp_member: profilerExitToggleOffset}
-      - {name: debugTrapHandlerOffset,       type: u32, cpp_member: debugTrapHandlerOffset}
-      - {name: debugPrologueOffset,          type: u32, cpp_member: "callVMOffsets.debugPrologueOffset"}
-      - {name: debugEpilogueOffset,          type: u32, cpp_member: "callVMOffsets.debugEpilogueOffset"}
-      - {name: debugAfterYieldOffset,        type: u32, cpp_member: "callVMOffsets.debugAfterYieldOffset"}
-      - {name: debugInstrumentationCount,    type: u32, cpp_member: "debugInstrumentationOffsets.length"}
-      - {name: debugTrapCount,               type: u32, cpp_member: "debugTrapOffsets.length"}
-      - {name: codeCoverageCount,            type: u32, cpp_member: "codeCoverageOffsets.length"}
-      - {name: icReturnCount,                type: u32, cpp_member: "icReturnOffsets.length"}
+      - u32: interpretOpOffset
+      - u32: interpretOpNoDebugTrapOffset
+      - u32: bailoutPrologueOffset
+      - u32: profilerEnterToggleOffset
+      - u32: profilerExitToggleOffset
+      - u32: debugTrapHandlerOffset
+      - u32: callVMOffsets.debugPrologueOffset
+      - u32: callVMOffsets.debugEpilogueOffset
+      - u32: callVMOffsets.debugAfterYieldOffset
     arrays:
-      - {name: debugInstrumentationOffsets, element: "uint32_t",
-         count_from: debugInstrumentationCount,
-         cpp_member: debugInstrumentationOffsets}
-      - {name: debugTrapOffsets,            element: "uint32_t",
-         count_from: debugTrapCount,
-         cpp_member: debugTrapOffsets}
-      - {name: codeCoverageOffsets,         element: "uint32_t",
-         count_from: codeCoverageCount,
-         cpp_member: codeCoverageOffsets}
-      - {name: icReturnOffsets,
-         element: "js::jit::BaselineInterpreterMetadata::ICReturnOffset",
-         count_from: icReturnCount,
-         cpp_member: icReturnOffsets}
+      - uint32_t: debugInstrumentationOffsets
+      - uint32_t: debugTrapOffsets
+      - uint32_t: codeCoverageOffsets
+      - js::jit::BaselineInterpreterMetadata::ICReturnOffset: icReturnOffsets
 
   BaselineFunction:
-    kind_id: 1
     doc: |
       Per-JSScript baseline JIT code plus the metadata needed to
       reconstruct a BaselineScript on load. Identity is by SHA-1 over
       the JSScript state the compiler reads (see AOTRecorder.cpp).
     metadata_type: "js::jit::BaselineScriptMetadata"
     fields:
-      - {name: warmUpCheckPrologueOffset, type: u32,
-         cpp_member: warmUpCheckPrologueOffset}
-      - {name: profilerEnterToggleOffset, type: u32,
-         cpp_member: profilerEnterToggleOffset}
-      - {name: profilerExitToggleOffset,  type: u32,
-         cpp_member: profilerExitToggleOffset}
-      - {name: flags,                     type: u8,  cpp_member: flags}
-      - {name: reserved,                  type: u8}
-      - {name: reserved2,                 type: u16}
-      - {name: retAddrCount,              type: u32,
-         cpp_member: "retAddrEntries.length"}
-      - {name: osrCount,                  type: u32,
-         cpp_member: "osrEntries.length"}
-      - {name: debugTrapCount,            type: u32,
-         cpp_member: "debugTrapEntries.length"}
-      - {name: resumeCount,               type: u32,
-         cpp_member: "resumeOffsetEntries.length"}
+      - u32: warmUpCheckPrologueOffset
+      - u32: profilerEnterToggleOffset
+      - u32: profilerExitToggleOffset
+      - u8: flags
     arrays:
-      - {name: retAddrEntries, element: "js::jit::RetAddrEntry",
-         count_from: retAddrCount, cpp_member: retAddrEntries}
-      - {name: osrEntries, element: "js::jit::BaselineScript::OSREntry",
-         count_from: osrCount, cpp_member: osrEntries}
-      - {name: debugTrapEntries,
-         element: "js::jit::BaselineScript::DebugTrapEntry",
-         count_from: debugTrapCount, cpp_member: debugTrapEntries}
-      - {name: resumeOffsetEntries, element: "js::jit::ResumeOffsetEntry",
-         count_from: resumeCount, cpp_member: resumeOffsetEntries}
+      - js::jit::RetAddrEntry: retAddrEntries
+      - js::jit::BaselineScript::OSREntry: osrEntries
+      - js::jit::BaselineScript::DebugTrapEntry: debugTrapEntries
+      - js::jit::ResumeOffsetEntry: resumeOffsetEntries
 
   InlineCacheStub:
-    kind_id: 2
     doc: |
       One AOT-compiled CacheIR stub. On load the CacheIR bytes plus
       the trailing field-type table are used to reconstruct a
@@ -93,32 +65,22 @@ blobs:
       text range in the per-zone stub map.
     metadata_type: "js::jit::AOTICStubMetadata"
     fields:
-      - {name: cacheKind,          type: u8,  cpp_member: cacheKind}
-      - {name: makesGCCalls,       type: u8,  cpp_member: makesGCCalls}
-      - {name: stubDataOffset,     type: u8,  cpp_member: stubDataOffset}
-      - {name: localTracingSlots,  type: u8,  cpp_member: localTracingSlots}
-      - {name: cacheIRCodeLength,  type: u32, cpp_member: "cacheIRCode.length"}
-      - {name: fieldTypesLength,   type: u32, cpp_member: "fieldTypes.length"}
+      - u8: cacheKind
+      - u8: makesGCCalls
+      - u8: stubDataOffset
+      - u8: localTracingSlots
     arrays:
-      - {name: cacheIRCode, element: "uint8_t",
-         count_from: cacheIRCodeLength, cpp_member: cacheIRCode}
-      - {name: fieldTypes,  element: "uint8_t",
-         count_from: fieldTypesLength,  cpp_member: fieldTypes}
+      - uint8_t: cacheIRCode
+      - uint8_t: fieldTypes
 
   Configuration:
-    kind_id: 3
     doc: "Code-generation options shared by all blobs in the image."
     metadata_type: "js::jit::AOTConfigurationMetadata"
     fields:
-      - {name: disableInlining, type: u8, cpp_member: disableInlining}
-      - {name: spectreObjectMitigations, type: u8,
-         cpp_member: spectreObjectMitigations}
-      - {name: spectreStringMitigations, type: u8,
-         cpp_member: spectreStringMitigations}
-      - {name: baselineBatching, type: u8, cpp_member: baselineBatching}
-      - {name: baselineJitWarmUpThreshold, type: u32,
-         cpp_member: baselineJitWarmUpThreshold}
-      - {name: baselineQueueCapacity, type: u32,
-         cpp_member: baselineQueueCapacity}
-      - {name: trialInliningWarmUpThreshold, type: u32,
-         cpp_member: trialInliningWarmUpThreshold}
+      - u8: disableInlining
+      - u8: spectreObjectMitigations
+      - u8: spectreStringMitigations
+      - u8: baselineBatching
+      - u32: baselineJitWarmUpThreshold
+      - u32: baselineQueueCapacity
+      - u32: trialInliningWarmUpThreshold

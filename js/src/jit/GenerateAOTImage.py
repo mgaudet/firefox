@@ -27,8 +27,8 @@ HEADER_TEMPLATE = """\
 """
 
 
-PRIMITIVE_SIZE = {"u8": 1, "u16": 2, "u32": 4}
-PRIMITIVE_CPP = {"u8": "uint8_t", "u16": "uint16_t", "u32": "uint32_t"}
+PRIMITIVES = {"u8": ("uint8_t", 1), "u16": ("uint16_t", 2), "u32": ("uint32_t", 4)}
+COUNT_TYPE = ("uint32_t", 4)
 
 
 def load_yaml(yaml_path):
@@ -40,39 +40,88 @@ def load_yaml(yaml_path):
     return yaml.safe_load(pp.out.getvalue())
 
 
-def field_size(f):
-    if f["type"] in PRIMITIVE_SIZE:
-        return PRIMITIVE_SIZE[f["type"]]
-    if f["type"] == "raw":
-        return int(f["size"])
-    raise ValueError("unknown field type: %s" % f["type"])
+def split_declaration(entry, context):
+    if not isinstance(entry, dict) or len(entry) != 1:
+        raise ValueError("%s must be a single 'type: member' pair" % context)
+    return next(iter(entry.items()))
 
 
-def field_align(f):
-    s = field_size(f)
-    return s if s in (1, 2, 4, 8) else 1
+# The serialized member name is the last component of the metadata member path,
+# so a nested member does not need to repeat itself in the schema.
+def member_name(path):
+    return path.rsplit(".", 1)[-1]
 
 
-def field_cpp_type(f):
-    if f["type"] in PRIMITIVE_CPP:
-        return PRIMITIVE_CPP[f["type"]]
-    if f["type"] == "raw":
-        return f["cpp_type"]
-    raise ValueError(f["type"])
-
-
-# Matches the compiler's aggregate layout by aligning each field naturally and
-# padding the complete structure to its maximum alignment. A generated compile
-# time assertion detects layout differences.
-def pod_sizeof(fields):
+# Mirrors the compiler's aggregate layout by aligning each member naturally,
+# with explicit padding members so that no byte of the serialized form is left
+# indeterminate. A generated assertion detects layout differences.
+def lay_out(fields):
+    members = []
     offset = 0
     max_align = 1
+
+    def pad(count):
+        members.append({"name": "padding%d" % len(members), "padding": count})
+
     for f in fields:
-        a = field_align(f)
-        max_align = max(max_align, a)
-        offset = (offset + a - 1) & ~(a - 1)
-        offset += field_size(f)
-    return (offset + max_align - 1) & ~(max_align - 1)
+        align = f["size"]
+        max_align = max(max_align, align)
+        if offset % align:
+            pad(align - offset % align)
+            offset += align - offset % align
+        members.append(f)
+        offset += f["size"]
+
+    if offset % max_align:
+        pad(max_align - offset % max_align)
+        offset += max_align - offset % max_align
+
+    return members, offset
+
+
+def parse_blob(kind, blob):
+    arrays = []
+    for entry in blob.get("arrays") or []:
+        element, path = split_declaration(entry, "array in blob %s" % kind)
+        arrays.append({"name": member_name(path), "path": path, "element": element})
+
+    fields = []
+    for entry in blob.get("fields") or []:
+        type_name, path = split_declaration(entry, "field in blob %s" % kind)
+        if type_name not in PRIMITIVES:
+            raise ValueError("unknown field type %s in blob %s" % (type_name, kind))
+        cpp_type, size = PRIMITIVES[type_name]
+        fields.append({
+            "name": member_name(path),
+            "path": path,
+            "cpp_type": cpp_type,
+            "size": size,
+        })
+
+    for a in arrays:
+        cpp_type, size = COUNT_TYPE
+        fields.append({
+            "name": a["name"] + "Count",
+            "path": a["path"] + ".length",
+            "cpp_type": cpp_type,
+            "size": size,
+        })
+
+    members, size = lay_out(fields)
+    names = [m["name"] for m in members]
+    if len(set(names)) != len(names):
+        raise ValueError("duplicate serialized member name in blob %s" % kind)
+
+    return {
+        "kind": kind,
+        "doc": blob.get("doc"),
+        "metadata_type": blob["metadata_type"],
+        "fields_type": "AOTFields_%s" % kind,
+        "fields": fields,
+        "arrays": arrays,
+        "members": members,
+        "size": size,
+    }
 
 
 def emit_lines(lines):
@@ -82,93 +131,69 @@ def emit_lines(lines):
 def emit_doc(doc):
     if not doc:
         return []
-    lines = []
-    for line in doc.splitlines():
-        lines.append("// " + line if line else "//")
-    return lines
+    return ["// " + line if line else "//" for line in doc.splitlines()]
 
 
-def emit_fields_pod(name, fields, doc=None):
-    lines = emit_doc(doc)
-    lines.append("struct %s {" % name)
-    for f in fields:
-        lines.append("  %s %s = {};" % (field_cpp_type(f), f["name"]))
+def emit_fields_pod(blob):
+    name = blob["fields_type"]
+    lines = ["struct %s {" % name]
+    for m in blob["members"]:
+        if "padding" in m:
+            lines.append("  uint8_t %s[%d] = {};" % (m["name"], m["padding"]))
+        else:
+            lines.append("  %s %s = {};" % (m["cpp_type"], m["name"]))
     lines.append("};")
-    size = pod_sizeof(fields)
-    lines.append("static_assert(sizeof(%s) == %d," % (name, size))
+    lines.append("static_assert(sizeof(%s) == %d," % (name, blob["size"]))
     lines.append('              "%s size drift; edit AOTImageSchema.yaml");' % name)
+    lines.append("static_assert(std::has_unique_object_representations_v<%s>," % name)
+    lines.append('              "%s must serialize without implicit padding");' % name)
     return emit_lines(lines)
 
 
-def emit_view_struct(name, fields_type, arrays):
+def metadata_expr(field):
+    if field["path"].endswith(".length"):
+        return "uint32_t(md.%s())" % field["path"]
+    return "md.%s" % field["path"]
+
+
+def emit_encode(blob):
     lines = [
-        "struct %s {" % name,
-        "  %s fields;" % fields_type,
-        "  mozilla::Span<const uint8_t> code;",
+        "[[nodiscard]] inline bool EncodeBlob_%s(" % blob["kind"],
+        "    AOTBlobWriter& blob, const %s& md) {" % blob["metadata_type"],
+        "  %s f = {};" % blob["fields_type"],
     ]
-    for a in arrays:
-        lines.append("  mozilla::Span<const %s> %s;" % (a["element"], a["name"]))
-    lines.append("};")
-    return emit_lines(lines)
-
-
-def encode_field_expr(f):
-    cpp = f.get("cpp_member")
-    if cpp is None:
-        return None
-    if cpp.endswith(".length"):
-        return "uint32_t(md.%s())" % cpp
-    return "md.%s" % cpp
-
-
-def emit_encode(kind, view_type, fields_type, fields, arrays, metadata_type):
-    lines = [
-        "[[nodiscard]] inline bool EncodeBlob_%s(" % kind,
-        "    AOTBlobWriter& blob, const %s& md) {" % metadata_type,
-        "  %s f = {};" % fields_type,
-    ]
-    for f in fields:
-        expr = encode_field_expr(f)
-        if expr is None:
-            continue
-        lines.append("  f.%s = %s;" % (f["name"], expr))
+    for f in blob["fields"]:
+        lines.append("  f.%s = %s;" % (f["name"], metadata_expr(f)))
     lines.append("  if (!blob.writeFields(f)) return false;")
-    for a in arrays:
-        cpp = a.get("cpp_member")
-        if cpp is None:
-            continue
+    for a in blob["arrays"]:
         lines.append(
             "  if (!blob.writeArray<%s>(md.%s.begin(), md.%s.length())) "
-            "return false;" % (a["element"], cpp, cpp)
+            "return false;" % (a["element"], a["path"], a["path"])
         )
     lines.append("  return true;")
     lines.append("}")
     return emit_lines(lines)
 
 
-def emit_decode(kind, view_type, fields_type, fields, arrays, metadata_type):
+def emit_decode(blob):
     lines = [
-        "[[nodiscard]] inline bool DecodeBlob_%s(" % kind,
-        "    AOTBlobReader& reader, %s* md) {" % metadata_type,
-        "  if (reader.fieldsSize() != sizeof(%s)) return false;" % fields_type,
-        "  %s f = reader.readFields<%s>();" % (fields_type, fields_type),
+        "[[nodiscard]] inline bool DecodeBlob_%s(" % blob["kind"],
+        "    AOTBlobReader& reader, %s* md) {" % blob["metadata_type"],
+        "  if (reader.fieldsSize() != sizeof(%s)) return false;" % blob["fields_type"],
+        "  %s f = reader.readFields<%s>();"
+        % (blob["fields_type"], blob["fields_type"]),
     ]
-    for f in fields:
-        cpp = f.get("cpp_member")
-        if cpp is None or cpp.endswith(".length"):
-            continue
-        lines.append("  md->%s = f.%s;" % (cpp, f["name"]))
-    for a in arrays:
-        cpp = a.get("cpp_member")
-        if cpp is None:
-            continue
+    for f in blob["fields"]:
+        if not f["path"].endswith(".length"):
+            lines.append("  md->%s = f.%s;" % (f["path"], f["name"]))
+    for a in blob["arrays"]:
         lines.append("  {")
         lines.append(
-            "    auto src = reader.readArray<%s>(f.%s);"
-            % (a["element"], a["count_from"])
+            "    auto src = reader.readArray<%s>(f.%sCount);"
+            % (a["element"], a["name"])
         )
         lines.append(
-            "    if (!md->%s.append(src.data(), src.size())) return false;" % cpp
+            "    if (!md->%s.append(src.data(), src.size())) return false;" % a["path"]
         )
         lines.append("  }")
     lines.append("  return true;")
@@ -176,66 +201,39 @@ def emit_decode(kind, view_type, fields_type, fields, arrays, metadata_type):
     return emit_lines(lines)
 
 
-def emit_view_reader(kind, view_type, fields_type, arrays):
-    lines = [
-        "inline %s ReadView_%s(AOTBlobReader& reader) {" % (view_type, kind),
-        "  %s v;" % view_type,
-        "  v.fields = reader.readFields<%s>();" % fields_type,
-        "  v.code = reader.code();",
-    ]
-    for a in arrays:
-        lines.append(
-            "  v.%s = reader.readArray<%s>(v.fields.%s);"
-            % (a["name"], a["element"], a["count_from"])
-        )
-    lines.append("  return v;")
-    lines.append("}")
-    return emit_lines(lines)
-
-
-def emit_blob(kind, blob):
-    fields_type = "AOTFields_%s" % kind
-    view_type = "AOTView_%s" % kind
-    fields = blob["fields"]
-    arrays = blob.get("arrays", []) or []
-    metadata_type = blob.get("metadata_type")
-
-    out = ["// ---- Blob: %s (kind_id=%d) ----" % (kind, blob["kind_id"])]
-    out.extend(emit_doc(blob.get("doc")))
+def emit_blob(kind_id, blob):
+    out = ["// ---- Blob: %s (kind %d) ----" % (blob["kind"], kind_id)]
+    out.extend(emit_doc(blob["doc"]))
     out.append("")
-    out.append(emit_fields_pod(fields_type, fields))
-    out.append(emit_view_struct(view_type, fields_type, arrays))
-    out.append(emit_view_reader(kind, view_type, fields_type, arrays))
-    if metadata_type:
-        out.append(
-            emit_encode(kind, view_type, fields_type, fields, arrays, metadata_type)
-        )
-        out.append(
-            emit_decode(kind, view_type, fields_type, fields, arrays, metadata_type)
-        )
+    out.append(emit_fields_pod(blob))
+    out.append(emit_encode(blob))
+    out.append(emit_decode(blob))
     return "\n".join(out)
 
 
+# Ensures the declaration order here matches the runtime enumeration so a
+# rename or reorder causes a compile error.
 def emit_kind_assertions(blobs):
-    # Ensures schema kind identifiers match the runtime enumeration so a rename
-    # or renumbering causes a compile error.
     lines = []
-    for name, blob in blobs.items():
+    for kind_id, blob in enumerate(blobs):
         lines.append(
-            "static_assert(uint32_t(AOTBlobKind::%s) == %d," % (name, blob["kind_id"])
+            "static_assert(uint32_t(AOTBlobKind::%s) == %d," % (blob["kind"], kind_id)
         )
         lines.append(
-            '              "AOTImageSchema.yaml kind_id drift for %s");' % name
+            '              "AOTImageSchema.yaml kind drift for %s");' % blob["kind"]
         )
     return emit_lines(lines)
 
 
 def main(c_out, yaml_path):
     schema = load_yaml(yaml_path)
-    blobs = schema.get("blobs") or {}
+    blobs = [
+        parse_blob(kind, blob) for kind, blob in (schema.get("blobs") or {}).items()
+    ]
 
     body = [
         "#include <cstdint>",
+        "#include <type_traits>",
         "",
         '#include "mozilla/Span.h"',
         "",
@@ -246,8 +244,8 @@ def main(c_out, yaml_path):
         "",
         emit_kind_assertions(blobs),
     ]
-    for name, blob in blobs.items():
-        body.append(emit_blob(name, blob))
+    for kind_id, blob in enumerate(blobs):
+        body.append(emit_blob(kind_id, blob))
     body.append("}  // namespace js::jit")
 
     c_out.write(
