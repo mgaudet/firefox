@@ -10,6 +10,7 @@
 
 #  include <cstring>
 
+#  include "gc/Memory.h"
 #  include "jit/JitOptions.h"
 #  include "jit/JitSpewer.h"
 
@@ -29,6 +30,18 @@ const AOTImage* AOTImage::embedded() {
     return cached;
   }
   initialized = true;
+
+  // Toggled instrumentation mprotects the pages holding a blob, and mprotect
+  // works in whole runtime pages. If those are coarser than the alignment the
+  // image was built with, the call reaches past the image into whatever the
+  // linker placed next to it and strips PROT_EXEC from unrelated code.
+  if (gc::SystemPageSize() > image::TextAlignment) {
+    JitSpew(JitSpew_BaselineAOT,
+            "AOT image alignment %u is below the %zu byte page size; "
+            "using runtime codegen",
+            image::TextAlignment, gc::SystemPageSize());
+    return nullptr;
+  }
 
   size_t size = size_t(aot_image_end - aot_image_start);
   auto img = fromBytes({aot_image_start, size});

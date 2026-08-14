@@ -83,7 +83,11 @@ inline constexpr uint32_t FingerprintSize = 20;
 inline constexpr uint32_t Alignment = 16;
 
 // Align generated code to a page boundary so its protection can change without
-// affecting image metadata.
+// affecting image metadata, or the .text the linker placed either side of the
+// image. This is a build-time constant but the page size is a runtime one, so
+// an image built here can be too coarsely aligned for the kernel running it;
+// AOTImage::embedded refuses such an image rather than let a toggle mprotect
+// its neighbours. The image shim aligns its own extent to match.
 inline constexpr uint32_t TextAlignment = 4096;
 
 struct Header {
