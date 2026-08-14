@@ -221,7 +221,31 @@ JitCode* JitRuntime::generateAOTPreambleTrampoline(JSContext* cx, void* target,
   AutoCreatedBy acb(masm, "JitRuntime::generateAOTPreambleTrampoline");
 
   masm.movePtr(ImmPtr(aotIndirectionTable_.baseAddress()), passReg);
+
+#ifdef JS_CODEGEN_ARM64
+  // Branch indirectly rather than through jump(ImmPtr).
+  //
+  // This trampoline lives in JIT-allocated memory and the target lives in the
+  // binary's static AOT image, so the two are far outside the +-128MB reach of
+  // an imm26 branch. jump(ImmPtr) emits a placeholder b and leaves the fixup to
+  // Assembler::executableCopy, which is supposed to divert an unreachable
+  // target through the extended jump table -- and does not always do so here,
+  // encoding a truncated direct branch instead. The result lands exactly one
+  // multiple of 256MB (the imm26 wrap) away from the real target, on whatever
+  // happens to be mapped there.
+  //
+  // Materializing the address and using br sidesteps the fixup entirely, at the
+  // cost of one instruction on a path taken once per entry point.
+  {
+    vixl::UseScratchRegisterScope temps(&masm);
+    const Register scratch = temps.AcquireX().asUnsized();
+    MOZ_ASSERT(scratch != passReg);
+    masm.movePtr(ImmPtr(target), scratch);
+    masm.jump(scratch);
+  }
+#else
   masm.jump(ImmPtr(target));
+#endif
 
   Linker linker(masm);
   return linker.newCode(cx, CodeKind::Other);
