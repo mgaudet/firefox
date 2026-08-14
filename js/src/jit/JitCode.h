@@ -171,6 +171,13 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
 
   uint8_t* jumpRelocTable() { return raw() + jumpRelocTableOffset(); }
 
+#ifdef ENABLE_JS_AOT
+  // Non-zero means the linker had to patch an address into this code, which an
+  // AOT recording cannot carry across builds.
+  uint32_t jumpRelocTableBytes() const { return jumpRelocTableBytes_; }
+  uint32_t dataRelocTableBytes() const { return dataRelocTableBytes_; }
+#endif
+
   // Allocates a new JitCode object which will be managed by the GC. If no
   // object can be allocated, nullptr is returned. On failure, |pool| is
   // automatically released, so the code may be freed.

@@ -74,6 +74,21 @@ bool AOTArtifactRecorder::init(JSContext* cx, const char* dir) {
   return writeBlobFile(cx, directory_ + "/configuration.aotb", blob, {});
 }
 
+// Recorded bytes are executed by a later build at an address this one cannot
+// know, so anything the linker would have had to patch is a runtime address
+// that escaped the indirection table. On x86 such a target is a displacement
+// the recorded bytes carry silently; on a fixed-width ISA it is worse, because
+// arm64's Assembler::finish appends an extended jump table of absolute
+// pointers to the code buffer itself. Neither survives being packed into an
+// image, so refuse to record instead of shipping code that jumps into the
+// recording process's address space.
+static void AssertNoAbsoluteRelocations(JitCode* code) {
+  MOZ_RELEASE_ASSERT(code->jumpRelocTableBytes() == 0,
+                     "AOT-recorded code has jump relocations");
+  MOZ_RELEASE_ASSERT(code->dataRelocTableBytes() == 0,
+                     "AOT-recorded code has data relocations");
+}
+
 bool AOTArtifactRecorder::wasSeen(const uint8_t identityHash[20]) {
   uint64_t key = Prefix64(identityHash);
   auto p = seen_.lookupForAdd(key);
@@ -141,6 +156,7 @@ bool AOTArtifactRecorder::recordInterpreter(
   AOTBlobWriter blob(AOTBlobKind::BaselineInterpreter, /* probeHash = */ 0,
                      /* identityHash = */ nullptr);
   if (!EncodeBlob_BaselineInterpreter(blob, md)) return false;
+  AssertNoAbsoluteRelocations(code);
   if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
 
   std::string path = directory_ + "/interp.aotb";
@@ -155,6 +171,7 @@ bool AOTArtifactRecorder::recordBaselineFunction(
 
   AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash, identityHash);
   if (!EncodeBlob_BaselineFunction(blob, md)) return false;
+  AssertNoAbsoluteRelocations(code);
   if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
 
   char idHex[41];
@@ -269,6 +286,7 @@ bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
 
   AOTBlobWriter blob(AOTBlobKind::InlineCacheStub, /* probeHash = */ 0, hash);
   if (!EncodeBlob_InlineCacheStub(blob, md)) return false;
+  AssertNoAbsoluteRelocations(code);
   if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
 
   char idHex[41];
