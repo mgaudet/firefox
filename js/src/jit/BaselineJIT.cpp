@@ -458,11 +458,12 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
     // realm-independent scripts should not have a realm set
     ar.emplace(cx, nullptr);
   }
-  StackMacroAssembler masm(cx, temp);
-
 #ifdef ENABLE_JS_AOT
   // Compile once in capture mode to validate pointer indirection and optionally
   // record the artifact. Compile again to produce code for the current runtime.
+  // The real assembler is constructed after this block: a StackMacroAssembler
+  // is large, and keeping both live at once doubles this frame's stack
+  // footprint on a path that recursion already reaches deeply.
   //
   // Debug-instrumented compiles are never captured. emitDebugTrap bakes the
   // runtime's debug trap handler in through a toggled call, which no
@@ -513,6 +514,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   }
 #endif
 
+  StackMacroAssembler masm(cx, temp);
   BaselineCompiler compiler(temp, CompileRuntime::get(cx->runtime()), masm,
                             &snapshot);
   if (!compiler.init()) {
