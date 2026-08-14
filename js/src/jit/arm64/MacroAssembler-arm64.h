@@ -2140,6 +2140,34 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
   bool buildOOLFakeExitFrame(void* fakeReturnAddr);
 };
 
+// Holds the acquisition so that ScratchRegisterScope can initialize its
+// Register base from an already-acquired register.
+struct AcquiredScratchRegister {
+  vixl::UseScratchRegisterScope temps_;
+  ARMRegister acquired_;
+
+  explicit AcquiredScratchRegister(vixl::MacroAssembler* masm)
+      : temps_(masm), acquired_(temps_.AcquireX()) {}
+};
+
+// arm64 has no register that is permanently free for the macro assembler's
+// callers: ip0 and ip1 are acquired opportunistically by
+// vixl::UseScratchRegisterScope throughout MacroAssemblerCompat. This gives
+// shared code the ScratchRegisterScope spelling the other backends provide,
+// backed by a real vixl acquisition, so macro assembler calls made while it is
+// live acquire a different register rather than clobbering this one.
+//
+// Deriving from Register rather than converting to it keeps overload
+// resolution on masm entry points unambiguous, matching x64.
+class ScratchRegisterScope : private AcquiredScratchRegister, public Register {
+ public:
+  explicit ScratchRegisterScope(MacroAssemblerCompat& masm)
+      : AcquiredScratchRegister(&masm), Register(acquired_.asUnsized()) {}
+
+  ScratchRegisterScope(const ScratchRegisterScope&) = delete;
+  void operator=(const ScratchRegisterScope&) = delete;
+};
+
 // See documentation for ScratchTagScope and ScratchTagScopeRelease in
 // MacroAssembler-x64.h.
 
