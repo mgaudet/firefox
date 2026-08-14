@@ -87,6 +87,20 @@ static constexpr Register PreBarrierReg{Registers::x1};
 
 static constexpr Register InterpreterPCReg{Registers::x9};
 
+#ifdef ENABLE_JS_AOT
+// One courier register serves both AOT entry paths on arm64, where x64 needs
+// two. x64 picks its couriers by caller ABI because both are allocatable
+// there; x28 is taken out of the allocatable set entirely (see
+// Architecture-arm64.h), so no caller can have a live value in it and the two
+// roles cannot collide. Being callee-saved it also survives a VM call, which
+// leaves room to pin it across an interpreter session later.
+static constexpr Register AOTInterpPassReg{Registers::x28};
+static constexpr Register AOTFuncPassReg = AOTInterpPassReg;
+static_assert(AOTFuncPassReg != ScratchReg);
+static_assert(AOTFuncPassReg != ScratchReg2);
+static_assert(Registers::NonAllocatableMask & (1 << Registers::x28));
+#endif
+
 static constexpr Register ReturnReg{Registers::x0};
 static constexpr Register64 ReturnReg64(ReturnReg);
 static constexpr Register JSReturnReg{Registers::x2};
@@ -627,6 +641,13 @@ class Assembler : public vixl::Assembler {
     BufferOffset off = EmitData(&x, sizeof(uintptr_t));
     label->patchAt()->bind(off.getOffset());
   }
+
+#ifdef ENABLE_JS_AOT
+  void writeInt32Data(int32_t value) {
+    armbuffer_.assertNoPoolAndNoNops();
+    EmitData(&value, sizeof(value));
+  }
+#endif
 
   void verifyHeapAccessDisassembly(uint32_t begin, uint32_t end,
                                    const Disassembler::HeapAccess& heapAccess) {

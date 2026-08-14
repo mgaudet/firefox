@@ -198,6 +198,13 @@ class Registers {
       (1 << Registers::x20) |  // PseudoStackPointer.
       (1 << Registers::ip0) |  // First scratch register.
       (1 << Registers::ip1) |  // Second scratch register.
+#ifdef ENABLE_JS_AOT
+      // AOT courier register. Carries the indirection table address from an
+      // entry trampoline to the frame it initializes. ip0 and ip1 cannot serve
+      // because vixl::UseScratchRegisterScope acquires them throughout the
+      // macro assembler, so the courier needs a register nothing else writes.
+      (1 << Registers::x28) |
+#endif
       (1 << Registers::tls) | (1 << Registers::lr) | (1 << Registers::sp) |
       (1 << Registers::fp);
 

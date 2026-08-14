@@ -182,11 +182,12 @@ set_config(
 )
 
 # Enable AOT artifacts for the baseline interpreter, self hosted functions, and
-# inline cache stubs. This is supported only on x86_64.
+# inline cache stubs.
 option(
     "--enable-aot",
     default=False,
-    help="{Enable|Disable} ahead-of-time compiled JIT artifacts (x86_64 only)",
+    help="{Enable|Disable} ahead-of-time compiled JIT artifacts "
+    "(x86_64 and aarch64 Linux only)",
 )
 
 
@@ -194,8 +195,22 @@ option(
 def js_aot(value, target):
     if not value:
         return None
-    if target.cpu != "x86_64":
-        die("--enable-aot is only supported on x86_64 (got %s)", target.cpu)
+    # Only these backends carry the codegen indirection layer. Others have no
+    # AOT courier registers and no interception of their absolute-address
+    # forms, so they would silently bake runtime pointers into recorded code.
+    if target.cpu not in ("x86_64", "aarch64"):
+        die(
+            "--enable-aot is only supported on x86_64 and aarch64 (got %s)",
+            target.cpu,
+        )
+    # The image shim emits ELF-only assembler directives (.pushsection with
+    # @progbits, .type, .size, unprefixed global symbols) and the artifact
+    # recorder uses POSIX open/mkdir and sys/mman.h.
+    if target.kernel != "Linux":
+        die(
+            "--enable-aot requires an ELF, POSIX target (got kernel %s)",
+            target.kernel,
+        )
     return True
 
 

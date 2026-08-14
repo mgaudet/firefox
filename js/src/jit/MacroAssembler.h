@@ -1117,7 +1117,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void load32SignExtendToPtr(const Address& src, Register dest) PER_ARCH;
 #ifdef ENABLE_JS_AOT
   inline void load32SignExtendToPtr(const BaseIndex& src, Register dest)
-      DEFINED_ON(x64);
+      DEFINED_ON(x64, arm64);
 #endif
 
   inline void loadAbiReturnAddress(Register dest) PER_SHARED_ARCH;
@@ -5345,7 +5345,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
 #ifdef ENABLE_JS_AOT
     if (isAOT()) {
-      callPreBarrierAOT(type, ScratchReg);
+      ScratchRegisterScope scratch(*this);
+      callPreBarrierAOT(type, scratch);
     } else
 #endif
     {
@@ -5367,12 +5368,17 @@ class MacroAssembler : public MacroAssemblerSpecific {
       // Cheap runtime-wide test first; only while an incremental GC is
       // active do we pay for the precise per-zone test, which has to load
       // the zone from the current execution context.
-      emitAOTLoadTableBase(ScratchReg);
+      //
+      // The scope must hold the register across the branch: on arm64 the
+      // address form below acquires a scratch of its own, and it has to get a
+      // different one than the table base sits in.
+      ScratchRegisterScope scratch(*this);
+      emitAOTLoadTableBase(scratch);
       branch32(Assembler::Equal,
-               Address(ScratchReg, AOTIndirectionTable::offsetOfSlot(
-                                       AOTSlot::PreBarrierZoneCount)),
+               Address(scratch, AOTIndirectionTable::offsetOfSlot(
+                                    AOTSlot::PreBarrierZoneCount)),
                Imm32(0), &done);
-      branchTestNeedsMarkingBarrierAnyZone(Assembler::Zero, &done, ScratchReg);
+      branchTestNeedsMarkingBarrierAnyZone(Assembler::Zero, &done, scratch);
     } else
 #endif
     {

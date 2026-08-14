@@ -57,6 +57,14 @@ void MacroAssembler::emitAOTSlotJump(AOTSlot slot, Register scratch) {
 #  endif
 }
 
+// Link sites name a symbol whose address the static linker resolves, so the
+// recorded instruction leaves a hole the image shim re-emits as a relocation.
+// The hole's shape is the instruction encoding's, which is why this is per
+// backend. Backends without an implementation report no link slots from
+// IsAOTLinkSlot, so every caller takes the indirection table path instead and
+// these are unreachable.
+#  ifdef JS_CODEGEN_X64
+
 // The encoders return the offset just past the instruction, so its
 // displacement occupies the four bytes before that.
 static uint32_t DisplacementOffset(CodeOffset afterInstruction) {
@@ -84,6 +92,22 @@ void MacroAssembler::emitAOTLinkLoad(AOTSlot slot, Register dest) {
   propagateOOM(aotLinkSites_.append(
       AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
 }
+
+#  else
+
+void MacroAssembler::emitAOTLinkAddress(AOTSlot slot, Register dest) {
+  MOZ_CRASH("AOT link slots are not implemented for this backend");
+}
+
+void MacroAssembler::emitAOTLinkCall(AOTSlot slot) {
+  MOZ_CRASH("AOT link slots are not implemented for this backend");
+}
+
+void MacroAssembler::emitAOTLinkLoad(AOTSlot slot, Register dest) {
+  MOZ_CRASH("AOT link slots are not implemented for this backend");
+}
+
+#  endif
 
 static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
   switch (type) {
