@@ -129,15 +129,36 @@ constexpr uint32_t AOTSlotTableHash() {
 
 const char* AOTSlotName(AOTSlot slot);
 
-// A four byte rip relative displacement inside recorded code that the next
-// build's static linker fills in from the slot's symbol. The displacement is
-// left zero at capture time; the recorded bytes are never executed.
+// What the image shim must produce at a link site.
+enum class AOTLinkKind : uint8_t {
+  // Transfer control to the symbol.
+  Call,
+  // Materialize the symbol's address into `reg`.
+  Address,
+  // Load 64 bits from the symbol into `reg`.
+  Load64,
+};
+
+// A hole in recorded code that the next build's static linker fills in from the
+// slot's symbol. Left zero at capture time; the recorded bytes are never
+// executed.
+//
+// What occupies the hole is per backend, which is why the kind and register
+// travel with it. On x86 the recorded instruction is kept and only its four
+// byte rip relative displacement is replaced, so `codeOffset` addresses the
+// displacement and `reg` is already encoded in the retained opcode. On a
+// fixed-width ISA there is no displacement field to patch: the shim emits whole
+// instructions, so `codeOffset` addresses the first of them and the register
+// has to be carried here.
 struct AOTLinkSite {
   uint32_t codeOffset;
   uint32_t slot;
+  uint8_t kind;    // AOTLinkKind
+  uint8_t reg;     // Register::Code; unused for Call
+  uint16_t width;  // bytes the shim replaces at codeOffset
 };
 
-static_assert(sizeof(AOTLinkSite) == 8, "AOTLinkSite is written to .aotb");
+static_assert(sizeof(AOTLinkSite) == 12, "AOTLinkSite is written to .aotb");
 
 class AOTIndirectionTable {
  public:

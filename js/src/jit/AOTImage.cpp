@@ -19,6 +19,8 @@
 extern "C" {
 extern const uint8_t aot_image_start[];
 extern const uint8_t aot_image_end[];
+// End of the emitted bytes, before the padding that aligns aot_image_end.
+extern const uint8_t aot_image_emitted_end[];
 }
 
 namespace js::jit {
@@ -42,6 +44,15 @@ const AOTImage* AOTImage::embedded() {
             image::TextAlignment, gc::SystemPageSize());
     return nullptr;
   }
+
+  // The shim must reproduce the packer's bytes exactly. If a link site
+  // assembles to a different length than the recorder reserved, every later
+  // branch target in that blob shifts, and nothing else would notice.
+  size_t emitted = size_t(aot_image_emitted_end - aot_image_start);
+  size_t declared = size_t(reinterpret_cast<const image::Header*>(aot_image_start)
+                               ->imageSize);
+  MOZ_RELEASE_ASSERT(emitted == declared,
+                     "AOT image size drift between packer and image shim");
 
   size_t size = size_t(aot_image_end - aot_image_start);
   auto img = fromBytes({aot_image_start, size});

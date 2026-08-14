@@ -86,21 +86,66 @@ void MacroAssembler::emitAOTLinkAddress(AOTSlot slot, Register dest) {
   MOZ_ASSERT(IsAOTLinkSlot(slot));
   CodeOffset off = Assembler::leaRipRelative(dest);
   propagateOOM(aotLinkSites_.append(
-      AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
+      AOTLinkSite{DisplacementOffset(off), uint32_t(slot),
+                  uint8_t(AOTLinkKind::Address), 0, sizeof(int32_t)}));
 }
 
 void MacroAssembler::emitAOTLinkCall(AOTSlot slot) {
   MOZ_ASSERT(IsAOTLinkSlot(slot));
   CodeOffset off = Assembler::callWithPatch();
   propagateOOM(aotLinkSites_.append(
-      AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
+      AOTLinkSite{DisplacementOffset(off), uint32_t(slot),
+                  uint8_t(AOTLinkKind::Call), 0, sizeof(int32_t)}));
 }
 
 void MacroAssembler::emitAOTLinkLoad(AOTSlot slot, Register dest) {
   MOZ_ASSERT(IsAOTLinkSlot(slot));
   CodeOffset off = Assembler::loadRipRelativeInt64(dest);
   propagateOOM(aotLinkSites_.append(
-      AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
+      AOTLinkSite{DisplacementOffset(off), uint32_t(slot),
+                  uint8_t(AOTLinkKind::Load64), 0, sizeof(int32_t)}));
+}
+
+#  elif defined(JS_CODEGEN_ARM64)
+
+// The shim emits whole instructions here, so the recorder reserves exactly the
+// space they will occupy and leaves it zero. Pools and alignment nops are
+// forbidden across the reservation: anything the assembler slipped in would
+// shift every later branch target relative to what the shim produces.
+void MacroAssembler::reserveAOTLinkSite(AOTSlot slot, AOTLinkKind kind,
+                                        Register dest, uint32_t instructions) {
+  MOZ_ASSERT(IsAOTLinkSlot(slot));
+  // The shim spells the register into its asm text, so encoding 31 would name
+  // xzr/sp rather than a destination.
+  MOZ_ASSERT_IF(kind != AOTLinkKind::Call, dest.code() != Registers::xzr);
+  AutoForbidPoolsAndNops afp(this, instructions);
+  uint32_t offset = currentOffset();
+  for (uint32_t i = 0; i < instructions; i++) {
+    writeInt32Data(0);
+  }
+  MOZ_ASSERT(currentOffset() - offset == instructions * sizeof(uint32_t));
+  propagateOOM(aotLinkSites_.append(
+      AOTLinkSite{offset, uint32_t(slot), uint8_t(kind), uint8_t(dest.code()),
+                  uint16_t(instructions * sizeof(uint32_t))}));
+}
+
+// adrp + add, reaching +-4GB.
+void MacroAssembler::emitAOTLinkAddress(AOTSlot slot, Register dest) {
+  reserveAOTLinkSite(slot, AOTLinkKind::Address, dest, 2);
+}
+
+// A single bl, reaching +-128MB. The linker inserts a range extension thunk
+// beyond that. The stack pointer sync that MacroAssembler::call performs has to
+// happen before the reservation, not inside it, because the shim replaces
+// exactly the reserved words.
+void MacroAssembler::emitAOTLinkCall(AOTSlot slot) {
+  syncStackPtr();
+  reserveAOTLinkSite(slot, AOTLinkKind::Call, Register{Registers::x0}, 1);
+}
+
+// adrp + ldr.
+void MacroAssembler::emitAOTLinkLoad(AOTSlot slot, Register dest) {
+  reserveAOTLinkSite(slot, AOTLinkKind::Load64, dest, 2);
 }
 
 #  else

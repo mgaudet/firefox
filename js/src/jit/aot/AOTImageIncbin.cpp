@@ -47,9 +47,53 @@ namespace {
   asm(AOT_IMAGE_PUSH ".incbin \"AOTImage.inc\"," #offset \
                      "," #length AOT_IMAGE_POP);
 
-#define AOT_IMAGE_SITE(slot)                                  \
-  asm(AOT_IMAGE_PUSH ".long %c0 - . - 4" AOT_IMAGE_POP ::"s"( \
-      AOTLinkSym<AOTSlot(slot)>::value));
+// Marks the true end of the emitted image, before the padding that aligns
+// aot_image_end. AOTImage::embedded checks the span against the size recorded
+// in the header: a site that assembles to a different length than the recorder
+// reserved would shift every later branch target, with no other symptom until
+// the code runs.
+//
+// An assembler-level ".if . - aot_image_start != bytes" would catch this at
+// build time instead, and does work for a single chunk, but the expression
+// stops being absolute once the image is split across many chunks, so it
+// cannot be relied on.
+#define AOT_IMAGE_TOTAL_SIZE(bytes)                              \
+  asm(AOT_IMAGE_PUSH ".globl aot_image_emitted_end\n\t"          \
+                     ".type aot_image_emitted_end, @object\n"   \
+                     "aot_image_emitted_end:" AOT_IMAGE_POP);
+
+#if defined(__x86_64__)
+
+// The recorded instruction is kept; only its rip relative displacement is
+// replaced. The destination register is already encoded in the retained
+// opcode, so the register operand is unused here.
+#  define AOT_IMAGE_SITE_CALL(slot, reg)                        \
+    asm(AOT_IMAGE_PUSH ".long %c0 - . - 4" AOT_IMAGE_POP ::"s"( \
+        AOTLinkSym<AOTSlot(slot)>::value));
+#  define AOT_IMAGE_SITE_ADDR(slot, reg) AOT_IMAGE_SITE_CALL(slot, reg)
+#  define AOT_IMAGE_SITE_LOAD(slot, reg) AOT_IMAGE_SITE_CALL(slot, reg)
+
+#elif defined(__aarch64__)
+
+// No displacement field exists to patch, so the shim emits whole instructions
+// and the recorder reserved exactly this much space. Note the constraint: the
+// x86 spelling "s" is rejected by clang on aarch64; "S" is the symbolic-address
+// constraint here.
+#  define AOT_IMAGE_SITE_CALL(slot, reg)                    \
+    asm(AOT_IMAGE_PUSH "bl %c0" AOT_IMAGE_POP ::"S"(        \
+        AOTLinkSym<AOTSlot(slot)>::value));
+#  define AOT_IMAGE_SITE_ADDR(slot, reg)                                  \
+    asm(AOT_IMAGE_PUSH "adrp x" #reg ", %c0\n\t"                          \
+                       "add x" #reg ", x" #reg ", :lo12:%c0"             \
+        AOT_IMAGE_POP ::"S"(AOTLinkSym<AOTSlot(slot)>::value));
+#  define AOT_IMAGE_SITE_LOAD(slot, reg)                                  \
+    asm(AOT_IMAGE_PUSH "adrp x" #reg ", %c0\n\t"                          \
+                       "ldr x" #reg ", [x" #reg ", :lo12:%c0]"           \
+        AOT_IMAGE_POP ::"S"(AOTLinkSym<AOTSlot(slot)>::value));
+
+#else
+#  error "No AOT image shim for this target"
+#endif
 
 __attribute__((used)) void EmbedAOTImage() {
   asm(AOT_IMAGE_PUSH
@@ -68,7 +112,10 @@ __attribute__((used)) void EmbedAOTImage() {
       ".size aot_image_start, aot_image_end - aot_image_start" AOT_IMAGE_POP);
 }
 
-#undef AOT_IMAGE_SITE
+#undef AOT_IMAGE_SITE_LOAD
+#undef AOT_IMAGE_SITE_ADDR
+#undef AOT_IMAGE_SITE_CALL
+#undef AOT_IMAGE_TOTAL_SIZE
 #undef AOT_IMAGE_CHUNK
 #undef AOT_IMAGE_SLOT_TABLE_HASH
 #undef AOT_IMAGE_POP

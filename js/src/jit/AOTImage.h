@@ -73,7 +73,7 @@ inline constexpr uint32_t Magic = 0x49544F41;
 
 // Increment the image format version whenever the layout, schema, or
 // fingerprint inputs change.
-inline constexpr uint16_t Version = 3;
+inline constexpr uint16_t Version = 4;
 
 // The fingerprint covers all engine inputs that affect generated code and is
 // checked when an image is loaded.
@@ -306,7 +306,7 @@ static_assert(sizeof(AOTBlobFileHeader) == 56,
 
 // "AOTB" in little-endian.
 inline constexpr uint32_t BlobFileMagic = 0x42544F41;
-inline constexpr uint16_t BlobFileVersion = 2;
+inline constexpr uint16_t BlobFileVersion = 3;
 
 // Builds an image in memory from recorded artifacts using a supplied
 // fingerprint.

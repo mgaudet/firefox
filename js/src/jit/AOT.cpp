@@ -17,6 +17,8 @@
 
 #if defined(JS_CODEGEN_X64)
 #  include "jit/x64/Assembler-x64.h"
+#elif defined(JS_CODEGEN_ARM64)
+#  include "jit/arm64/Assembler-arm64.h"
 #endif
 
 #include "jit/AOTABIFns-inl.h"
@@ -55,7 +57,7 @@ const char* AOTSlotName(AOTSlot slot) {
 }
 
 bool IsAOTLinkSlot(AOTSlot slot) {
-#ifdef JS_CODEGEN_X64
+#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64)
   if (IsNamedAOTLinkSlot(slot)) {
     return true;
   }

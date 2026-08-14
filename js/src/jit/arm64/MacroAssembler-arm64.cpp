@@ -1616,6 +1616,25 @@ CodeOffset MacroAssembler::call(Label* label) {
 }
 
 void MacroAssembler::call(ImmPtr imm) {
+#ifdef ENABLE_JS_AOT
+  if (MOZ_UNLIKELY(isAOT())) {
+    if (auto slot = aotTable().findSlot(uintptr_t(imm.value))) {
+      if (IsAOTLinkSlot(*slot)) {
+        // One bl, resolved by the static linker. emitAOTLinkCall syncs the
+        // stack pointer itself.
+        emitAOTLinkCall(*slot);
+        return;
+      }
+      vixl::UseScratchRegisterScope temps(this);
+      const Register scratch = temps.AcquireX().asUnsized();
+      syncStackPtr();
+      emitAOTSlotCall(*slot, scratch);
+      return;
+    }
+    // Falls through to the movePtr below, which crashes with a diagnostic if
+    // the pointer has no slot.
+  }
+#endif
   // This sync has been observed (and is expected) to be necessary.
   // eg testcase: asm.js/testTimeout5.js
   syncStackPtr();

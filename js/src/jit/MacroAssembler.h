@@ -429,6 +429,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void emitAOTLinkAddress(AOTSlot slot, Register dest);
   void emitAOTLinkLoad(AOTSlot slot, Register dest);
   void emitAOTLinkCall(AOTSlot slot);
+#ifdef JS_CODEGEN_ARM64
+  void reserveAOTLinkSite(AOTSlot slot, AOTLinkKind kind, Register dest,
+                          uint32_t instructions);
+#endif
 
   mozilla::Span<const AOTLinkSite> aotLinkSites() const {
     return {aotLinkSites_.begin(), aotLinkSites_.length()};
