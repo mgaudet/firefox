@@ -480,12 +480,15 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       ReportOutOfMemory(cx);
       return Method_Error;
     }
+    // Finish the buffer before measuring it. On a backend with constant pools
+    // the buffer size is only accurate once pending pool entries have been
+    // flushed, and asking for it earlier asserts.
+    Linker linker(dumpMasm);
     JitSpew(JitSpew_BaselineAOT,
             "baseline func AOT capture ok: %s:%u bytes=%zu",
             script->filename() ? script->filename() : "<null>",
             unsigned(script->lineno()), size_t(dumpMasm.instructionsSize()));
     if (AOTArtifactRecorder* rec = cx->runtime()->jitRuntime()->aotRecorder()) {
-      Linker linker(dumpMasm);
       JitCode* dumpCode = linker.newCode(cx, CodeKind::Baseline);
       if (!dumpCode) {
         return Method_Error;
