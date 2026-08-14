@@ -20,6 +20,7 @@
 #  include "jit/BaselineIC.h"
 #  include "jit/BaselineJIT.h"
 #  include "jit/CacheIRCompiler.h"
+#  include "jit/FlushICache.h"
 #  include "jit/JitCode.h"
 #  include "jit/JitcodeMap.h"
 #  include "jit/JitOptions.h"
@@ -40,6 +41,17 @@
 namespace js::jit {
 
 static bool IsAOTImageCompatible(const AOTImage* image) {
+  // Toggled instrumentation rewrites static code in place. Because that code
+  // is shared by every thread in the process, the rewrite has to flush their
+  // execution contexts, and there is no synchronization point at which each
+  // thread could flush its own. Without the process-wide flush the image is
+  // not safe to install.
+  if (!CanFlushExecutionContextForAllThreads()) {
+    JitSpew(JitSpew_BaselineAOT,
+            "cannot flush execution context for all threads; "
+            "using runtime codegen");
+    return false;
+  }
   auto readerOpt = image->findUnique(AOTBlobKind::Configuration);
   if (readerOpt.isNothing()) {
     JitSpew(JitSpew_BaselineAOT, "AOT image lacks configuration metadata");

@@ -87,6 +87,14 @@ class MOZ_RAII AutoWritableJitCodeFallible {
     if (isStatic_) {
       jit::FlushICache(addr_, size_);
       ok = StaticMprotect(addr_, size_, false);
+      // FlushICache only flushes the execution context of the calling thread.
+      // Static code is shared by every thread in the process and there is no
+      // synchronization point at which the others could flush their own, so
+      // flush them all before the modified code becomes reachable. AOT
+      // installation is refused outright when this is unavailable, so the
+      // capability check cannot fail here.
+      MOZ_RELEASE_ASSERT(jit::CanFlushExecutionContextForAllThreads());
+      jit::FlushExecutionContextForAllThreads();
     } else
 #endif
     {
