@@ -1967,6 +1967,9 @@ void MacroAssembler::moveValue(const Value& src, const ValueOperand& dest) {
     return;
   }
 
+#ifdef ENABLE_JS_AOT
+  MOZ_ASSERT(!isAOT(), "moveValue with GC thing not intercepted in AOT mode");
+#endif
   BufferOffset load =
       movePatchablePtr(ImmPtr(src.bitsAsPunboxPointer()), dest.valueReg());
   writeDataRelocation(src, load);

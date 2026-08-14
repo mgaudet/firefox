@@ -61,6 +61,11 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   MacroAssembler& asMasm();
   const MacroAssembler& asMasm() const;
 
+  // Bridges to the derived MacroAssembler, which is incomplete in this header
+  // so its members cannot be named here. Defined in MacroAssembler-x64-inl.h.
+  inline void moveRuntimeAddress(ImmPtr addr, Register dest);
+  inline bool isAOTCodegen() const;
+
   void bindOffsets(const MacroAssemblerX86Shared::UsesVector&);
 
   void vpRiprOpSimd128(const SimdConstant& v, FloatRegister reg,
@@ -585,11 +590,11 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   }
   void loadPrivate(const Address& src, Register dest) { loadPtr(src, dest); }
   void load32(AbsoluteAddress address, Register dest) {
-    if (X86Encoding::IsAddressImmediate(address.addr)) {
+    if (X86Encoding::IsAddressImmediate(address.addr) && !isAOTCodegen()) {
       movl(Operand(address), dest);
     } else {
       ScratchRegisterScope scratch(asMasm());
-      mov(ImmPtr(address.addr), scratch);
+      moveRuntimeAddress(ImmPtr(address.addr), scratch);
       load32(Address(scratch, 0x0), dest);
     }
   }
@@ -657,11 +662,11 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
     }
   }
   void store32(Register src, AbsoluteAddress address) {
-    if (X86Encoding::IsAddressImmediate(address.addr)) {
+    if (X86Encoding::IsAddressImmediate(address.addr) && !isAOTCodegen()) {
       movl(src, Operand(address));
     } else {
       ScratchRegisterScope scratch(asMasm());
-      mov(ImmPtr(address.addr), scratch);
+      moveRuntimeAddress(ImmPtr(address.addr), scratch);
       store32(src, Address(scratch, 0x0));
     }
   }

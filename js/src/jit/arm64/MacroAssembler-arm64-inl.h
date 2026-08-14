@@ -111,6 +111,12 @@ void MacroAssembler::move32ZeroExtendToPtr(Register src, Register dest) {
 // ===============================================================
 // Load instructions
 
+void MacroAssemblerCompat::moveRuntimeAddress(ImmPtr addr, Register dest) {
+  asMasm().movePtr(addr, dest);
+}
+
+bool MacroAssemblerCompat::isAOTCodegen() const { return asMasm().isAOT(); }
+
 void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
   load32(src, dest);
   move32To64SignExtend(dest, Register64(dest));
@@ -656,7 +662,7 @@ void MacroAssembler::inc64(AbsoluteAddress dest) {
   const ARMRegister scratchAddr64 = temps.AcquireX();
   const ARMRegister scratch64 = temps.AcquireX();
 
-  Mov(scratchAddr64, uint64_t(dest.addr));
+  movePtr(ImmPtr(dest.addr), scratchAddr64.asUnsized());
   Ldr(scratch64, MemOperand(scratchAddr64, 0));
   Add(scratch64, scratch64, Operand(1));
   Str(scratch64, MemOperand(scratchAddr64, 0));

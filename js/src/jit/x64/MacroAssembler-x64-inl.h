@@ -71,6 +71,12 @@ void MacroAssembler::move32ZeroExtendToPtr(Register src, Register dest) {
 // ===============================================================
 // Load instructions
 
+void MacroAssemblerX64::moveRuntimeAddress(ImmPtr addr, Register dest) {
+  asMasm().movePtr(addr, dest);
+}
+
+bool MacroAssemblerX64::isAOTCodegen() const { return asMasm().isAOT(); }
+
 void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
   movslq(Operand(src), dest);
 }
@@ -361,11 +367,15 @@ void MacroAssembler::mulDoublePtr(ImmPtr imm, Register temp,
 }
 
 void MacroAssembler::inc64(AbsoluteAddress dest) {
-  if (X86Encoding::IsAddressImmediate(dest.addr)) {
+  bool useImmediate = X86Encoding::IsAddressImmediate(dest.addr);
+#ifdef ENABLE_JS_AOT
+  useImmediate = useImmediate && !isAOT();
+#endif
+  if (useImmediate) {
     addPtr(Imm32(1), dest);
   } else {
     ScratchRegisterScope scratch(*this);
-    mov(ImmPtr(dest.addr), scratch);
+    movePtr(ImmPtr(dest.addr), scratch);
     addPtr(Imm32(1), Address(scratch, 0));
   }
 }

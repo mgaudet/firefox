@@ -50,6 +50,13 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
   const js::jit::MacroAssembler& asMasm() const;
 
  public:
+  // Bridges to the derived MacroAssembler, which is incomplete in this header
+  // so its members cannot be named here. Defined in MacroAssembler-arm64-inl.h.
+  // Members of this class that reach a runtime address by any other route bake
+  // it in, which AOT codegen cannot see and cannot fix up.
+  inline void moveRuntimeAddress(ImmPtr addr, Register dest);
+  inline bool isAOTCodegen() const;
+
   // Restrict to only VIXL-internal functions.
   vixl::MacroAssembler& asVIXL();
   const MacroAssembler& asVIXL() const;
@@ -310,6 +317,10 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
     vixl::UseScratchRegisterScope temps(this);
     const Register scratch = temps.AcquireX().asUnsized();
     if (val.isGCThing()) {
+#ifdef ENABLE_JS_AOT
+      MOZ_ASSERT(!isAOTCodegen(),
+                 "pushValue with GC thing not intercepted in AOT mode");
+#endif
       BufferOffset load =
           movePatchablePtr(ImmPtr(val.bitsAsPunboxPointer()), scratch);
       writeDataRelocation(val, load);
@@ -339,6 +350,10 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
   }
   void moveValue(const Value& val, Register dest) {
     if (val.isGCThing()) {
+#ifdef ENABLE_JS_AOT
+      MOZ_ASSERT(!isAOTCodegen(),
+                 "moveValue with GC thing not intercepted in AOT mode");
+#endif
       BufferOffset load =
           movePatchablePtr(ImmPtr(val.bitsAsPunboxPointer()), dest);
       writeDataRelocation(val, load);
@@ -737,7 +752,9 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
   void loadPtr(AbsoluteAddress address, Register dest) {
     vixl::UseScratchRegisterScope temps(this);
     const ARMRegister scratch = temps.AcquireX();
-    movePtr(ImmWord((uintptr_t)address.addr), scratch.asUnsized());
+    // Via moveRuntimeAddress rather than an ImmWord move, so AOT codegen sees
+    // the address and can route it through the indirection table.
+    moveRuntimeAddress(ImmPtr(address.addr), scratch.asUnsized());
     Ldr(ARMRegister(dest, 64), MemOperand(scratch));
   }
   FaultingCodeOffset loadPtr(const Address& address, Register dest) {
@@ -886,14 +903,14 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
   void storePtr(Register src, AbsoluteAddress address) {
     vixl::UseScratchRegisterScope temps(this);
     const ARMRegister scratch64 = temps.AcquireX();
-    Mov(scratch64, uint64_t(address.addr));
+    moveRuntimeAddress(ImmPtr(address.addr), scratch64.asUnsized());
     Str(ARMRegister(src, 64), MemOperand(scratch64));
   }
 
   void store32(Register src, AbsoluteAddress address) {
     vixl::UseScratchRegisterScope temps(this);
     const ARMRegister scratch64 = temps.AcquireX();
-    Mov(scratch64, uint64_t(address.addr));
+    moveRuntimeAddress(ImmPtr(address.addr), scratch64.asUnsized());
     Str(ARMRegister(src, 32), MemOperand(scratch64));
   }
   void store32(Imm32 imm, const Address& address) {
@@ -1182,7 +1199,7 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
   void load32(AbsoluteAddress address, Register dest) {
     vixl::UseScratchRegisterScope temps(this);
     const ARMRegister scratch64 = temps.AcquireX();
-    movePtr(ImmWord((uintptr_t)address.addr), scratch64.asUnsized());
+    moveRuntimeAddress(ImmPtr(address.addr), scratch64.asUnsized());
     ldr(ARMRegister(dest, 32), MemOperand(scratch64));
   }
   template <typename S>
