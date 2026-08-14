@@ -463,7 +463,12 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
 #ifdef ENABLE_JS_AOT
   // Compile once in capture mode to validate pointer indirection and optionally
   // record the artifact. Compile again to produce code for the current runtime.
-  if (JitOptions.shouldCaptureAOTBaseline()) {
+  //
+  // Debug-instrumented compiles are never captured. emitDebugTrap bakes the
+  // runtime's debug trap handler in through a toggled call, which no
+  // indirection slot can reach, and debuggee-ness is a per-runtime property
+  // that a shared image has no business recording.
+  if (JitOptions.shouldCaptureAOTBaseline() && !compileDebugInstrumentation) {
     TempAllocator dumpTemp(&cx->tempLifoAlloc());
     StackMacroAssembler dumpMasm(cx, dumpTemp);
     if (cx->runtime()->geckoProfiler().enabled()) {
