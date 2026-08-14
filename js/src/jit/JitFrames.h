@@ -920,7 +920,17 @@ class BaselineStubFrameLayout : public CommonFrameLayout {
  public:
   static constexpr size_t ICStubOffset = sizeof(void*);
   static constexpr int ICStubOffsetFromFP = -int(ICStubOffset);
-#ifdef ENABLE_JS_AOT
+  // Whether the stub frame carries its own copy of the AOT indirection table
+  // address. Doing so costs a push in every stub entry and shifts everything
+  // below it, in exchange for reaching the table with one load instead of two.
+  //
+  // arm64 opts out. EmitBaselineEnterStubFrame there pushes exactly four words
+  // and ends in checkStackAlignment(); a fifth single push is eight bytes and
+  // breaks the sixteen byte invariant, so carrying the slot would mean a
+  // padding word and a different layout from x64 for no clear gain. Stub code
+  // reaches the table through the caller's baseline frame instead.
+#if defined(ENABLE_JS_AOT) && !defined(JS_CODEGEN_ARM64)
+#  define JS_AOT_STUB_FRAME_HAS_TABLE_SLOT 1
   static constexpr int AOTTableOffsetFromFP = 2 * -int(sizeof(void*));
   static constexpr int InlinedICScriptOffsetFromFP = 3 * -int(sizeof(void*));
   static constexpr size_t LocallyTracedValueOffset = 3 * sizeof(void*);

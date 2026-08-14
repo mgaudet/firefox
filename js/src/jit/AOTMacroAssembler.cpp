@@ -20,9 +20,19 @@ void MacroAssembler::emitAOTLoadTableBase(Register dest) {
   // Load the indirection table address from the stub frame when one is active.
   // Otherwise load it from the baseline frame.
   if (inAOTStubFrame_) {
+#  ifdef JS_AOT_STUB_FRAME_HAS_TABLE_SLOT
     MacroAssemblerSpecific::loadPtr(
         Address(FramePointer, BaselineStubFrameLayout::AOTTableOffsetFromFP),
         dest);
+#  else
+    // No slot in the stub frame, so go through the caller. [FP] is the saved
+    // frame pointer of the BaselineJS frame that entered the stub, which is
+    // where the prologue stored the table address. Same two hops
+    // emitAOTCopyFrameTableBaseFromCaller relies on.
+    MacroAssemblerSpecific::loadPtr(Address(FramePointer, 0), dest);
+    MacroAssemblerSpecific::loadPtr(
+        Address(dest, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
+#  endif
   } else {
     MacroAssemblerSpecific::loadPtr(
         Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()),
