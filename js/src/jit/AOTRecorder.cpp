@@ -15,6 +15,7 @@
 #  include <cstdio>
 #  include <cstring>
 #  include <fcntl.h>
+#  include <sys/mman.h>
 #  include <sys/stat.h>
 #  include <sys/types.h>
 #  include <unistd.h>
@@ -89,6 +90,80 @@ static void AssertNoAbsoluteRelocations(JitCode* code) {
                      "AOT-recorded code has data relocations");
 }
 
+#  if defined(JS_CODEGEN_ARM64) && defined(XP_LINUX)
+
+// A pointer materialized as a bare immediate leaves no relocation and never
+// passes through movePtr, so neither the check above nor the interception
+// layer's unknown-pointer crash can see it. The recorded bytes simply carry
+// the recording process's address, and the next process reads a stale one --
+// silently, because the code still executes. Catching it needs the recorded
+// instructions themselves.
+static bool IsMappedInThisProcess(uintptr_t value) {
+  static const size_t pageSize = size_t(sysconf(_SC_PAGESIZE));
+  unsigned char unused;
+  void* page = reinterpret_cast<void*>(value & ~uintptr_t(pageSize - 1));
+  return mincore(page, pageSize, &unused) == 0;
+}
+
+// Walks movz/movk runs and reports the completed value. Judging a partial run
+// would flag every NaN-boxed constant in the corpus, since those finish with
+// a `movk ..., lsl #48`.
+static void AssertNoBakedAddresses(JitCode* code) {
+  // Below this a value is a constant or a bitmask, not an address. Tags sit
+  // above the 48-bit userspace ceiling and are excluded by the mapping check.
+  static constexpr uintptr_t kMinPlausibleAddress = uintptr_t(1) << 32;
+
+  constexpr uint32_t kMask = 0xFF800000;
+  constexpr uint32_t kMovz = 0xD2800000;
+  constexpr uint32_t kMovk = 0xF2800000;
+
+  const uint32_t* insns = reinterpret_cast<const uint32_t*>(code->raw());
+  size_t count = code->instructionsSize() / sizeof(uint32_t);
+
+  uint64_t pending[32] = {};
+  bool live[32] = {};
+
+  auto check = [&](uint32_t reg) {
+    uint64_t v = pending[reg];
+    if (v >= kMinPlausibleAddress && IsMappedInThisProcess(v)) {
+      MOZ_CRASH_UNSAFE_PRINTF(
+          "AOT: recorded code bakes the address %p as an immediate; route it "
+          "through movePtr so the indirection table or a link slot covers it.",
+          reinterpret_cast<void*>(uintptr_t(v)));
+    }
+  };
+
+  for (size_t i = 0; i < count; i++) {
+    uint32_t insn = insns[i];
+    uint32_t top = insn & kMask;
+    uint32_t hw = (insn >> 21) & 0x3;
+    uint64_t imm16 = (insn >> 5) & 0xFFFF;
+    uint32_t rd = insn & 0x1F;
+    if (top == kMovz) {
+      if (live[rd]) {
+        check(rd);
+      }
+      pending[rd] = imm16 << (16 * hw);
+      live[rd] = true;
+    } else if (top == kMovk && live[rd]) {
+      pending[rd] &= ~(uint64_t(0xFFFF) << (16 * hw));
+      pending[rd] |= imm16 << (16 * hw);
+    } else if (live[rd]) {
+      check(rd);
+      live[rd] = false;
+    }
+  }
+  for (uint32_t rd = 0; rd < 32; rd++) {
+    if (live[rd]) {
+      check(rd);
+    }
+  }
+}
+
+#  else
+static void AssertNoBakedAddresses(JitCode* code) {}
+#  endif
+
 bool AOTArtifactRecorder::wasSeen(const uint8_t identityHash[20]) {
   uint64_t key = Prefix64(identityHash);
   auto p = seen_.lookupForAdd(key);
@@ -157,6 +232,7 @@ bool AOTArtifactRecorder::recordInterpreter(
                      /* identityHash = */ nullptr);
   if (!EncodeBlob_BaselineInterpreter(blob, md)) return false;
   AssertNoAbsoluteRelocations(code);
+  AssertNoBakedAddresses(code);
   if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
 
   std::string path = directory_ + "/interp.aotb";
@@ -172,6 +248,7 @@ bool AOTArtifactRecorder::recordBaselineFunction(
   AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash, identityHash);
   if (!EncodeBlob_BaselineFunction(blob, md)) return false;
   AssertNoAbsoluteRelocations(code);
+  AssertNoBakedAddresses(code);
   if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
 
   char idHex[41];
@@ -287,6 +364,7 @@ bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
   AOTBlobWriter blob(AOTBlobKind::InlineCacheStub, /* probeHash = */ 0, hash);
   if (!EncodeBlob_InlineCacheStub(blob, md)) return false;
   AssertNoAbsoluteRelocations(code);
+  AssertNoBakedAddresses(code);
   if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
 
   char idHex[41];
