@@ -862,7 +862,7 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
     vixl::UseScratchRegisterScope temps(this);
     const ARMRegister scratch64 = temps.AcquireX();
     MOZ_ASSERT(scratch64.asUnsized() != address.base);
-    Mov(scratch64, uint64_t(imm.value));
+    moveRuntimeAddress(imm, scratch64.asUnsized());
     Str(scratch64, toMemOperand(address));
   }
   void storePtr(ImmGCPtr imm, const Address& address) {
@@ -1045,8 +1045,21 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
   void cmpPtr(Register lhs, ImmWord rhs) {
     Cmp(ARMRegister(lhs, 64), Operand(rhs.value));
   }
+  // An ImmPtr names an address in this process. Materializing it as a bare
+  // immediate hides it from the AOT interception layer, which only inspects
+  // pointers routed through movePtr, so a recorded compare would silently
+  // carry the recording process's address. x64 avoids this by construction:
+  // its cmpPtr falls back to movePtr for anything wider than an int32.
   void cmpPtr(Register lhs, ImmPtr rhs) {
-    Cmp(ARMRegister(lhs, 64), Operand(uint64_t(rhs.value)));
+    if (rhs.value == nullptr) {
+      Cmp(ARMRegister(lhs, 64), Operand(0));
+      return;
+    }
+    vixl::UseScratchRegisterScope temps(this);
+    const Register scratch = temps.AcquireX().asUnsized();
+    MOZ_ASSERT(scratch != lhs);
+    moveRuntimeAddress(rhs, scratch);
+    cmpPtr(lhs, scratch);
   }
   void cmpPtr(Register lhs, Imm64 rhs) {
     Cmp(ARMRegister(lhs, 64), Operand(uint64_t(rhs.value)));
@@ -1082,7 +1095,13 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
     const ARMRegister scratch64 = temps.AcquireX();
     MOZ_ASSERT(scratch64.asUnsized() != lhs.base);
     Ldr(scratch64, toMemOperand(lhs));
-    Cmp(scratch64, Operand(uint64_t(rhs.value)));
+    if (rhs.value == nullptr) {
+      Cmp(scratch64, Operand(0));
+      return;
+    }
+    const ARMRegister scratch2_64 = temps.AcquireX();
+    moveRuntimeAddress(rhs, scratch2_64.asUnsized());
+    Cmp(scratch64, scratch2_64);
   }
   void cmpPtr(const Address& lhs, ImmGCPtr rhs) {
     vixl::UseScratchRegisterScope temps(this);
